@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rtt-client"
+version = "0.1.0"
+description = "Small command-line client for the Realtime Trains Next Generation API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "RTT API explorer" }]
+dependencies = []
+
+[project.scripts]
+rtt = "rtt_app.cli:main"
+rtt-gui = "rtt_app.gui:main"
+
+[tool.setuptools.packages.find]
+include = ["rtt_app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
