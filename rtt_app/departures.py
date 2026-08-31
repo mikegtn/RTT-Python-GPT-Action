@@ -133,6 +133,24 @@ def _status(service: dict[str, Any], timing: dict[str, Any]) -> str:
         if lateness < 0:
             return f"{abs(int(lateness))} min early"
         return "On time"
+    scheduled = timing.get("scheduleAdvertised") or timing.get("scheduleInternal")
+    realtime = (
+        timing.get("realtimeActual")
+        or timing.get("realtimeForecast")
+        or timing.get("realtimeEstimate")
+    )
+    if scheduled and realtime:
+        try:
+            scheduled_dt = datetime.fromisoformat(str(scheduled).replace("Z", "+00:00"))
+            realtime_dt = datetime.fromisoformat(str(realtime).replace("Z", "+00:00"))
+            difference = round((realtime_dt - scheduled_dt).total_seconds() / 60)
+            if difference > 0:
+                return f"{difference} min late"
+            if difference < 0:
+                return f"{abs(difference)} min early"
+            return "On time"
+        except ValueError:
+            pass
     if timing.get("realtimeNoReport"):
         return "No report"
     return "On time" if timing.get("realtimeForecast") or timing.get("realtimeActual") else "Scheduled"
@@ -254,4 +272,3 @@ def format_board(board: DepartureBoard) -> str:
             *(render(row) for row in rows),
         ]
     )
-

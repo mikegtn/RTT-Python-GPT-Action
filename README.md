@@ -36,6 +36,84 @@ expected times, destination, platform, allocation and service status. The token
 field is masked and is pre-filled from `.env` when `RTT_TOKEN` is configured.
 The GUI does not save a token entered into the field.
 
+## GPT-powered Rail Assistant
+
+Double-click `RTT Rail Assistant.pyw` to ask natural-language questions about
+rail services. It connects GPT to the local RTT Python client using function
+calling, so the RTT token remains on this machine rather than being placed in a
+Custom GPT or browser client.
+
+Add an OpenAI API key to `.env` (or paste it into the masked field):
+
+```dotenv
+OPENAI_API_KEY=replace-with-your-openai-api-key
+OPENAI_MODEL=gpt-5.4
+```
+
+Example questions:
+
+- `What are the next five trains from Bristol Temple Meads?`
+- `What unit is working the 18:36 Paddington to Castle Cary today?`
+- `Which arriving train forms it?`
+- `Is it late or cancelled, and what platform is it using?`
+- `Does RTT provide coach letters or First Class formation data?`
+
+The assistant is instructed to query RTT for live claims, distinguish booked
+from live data, and say when allocation or KYT information is absent. OpenAI API
+usage is billed separately from ChatGPT subscriptions.
+
+## ChatGPT GPT Action
+
+The project also includes a read-only HTTP bridge for a GPT Action. In this
+configuration ChatGPT supplies the language model, so the bridge does **not**
+need `OPENAI_API_KEY`. It needs the RTT token plus a separate action password:
+
+```dotenv
+RTT_TOKEN=your-rtt-token
+ACTION_API_KEY=generate-a-long-random-value
+ACTION_BASE_URL=https://your-public-action-host.example
+```
+
+Generate an action password in PowerShell:
+
+```powershell
+$bytes = [byte[]]::new(32)
+[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+[Convert]::ToHexString($bytes)
+```
+
+Save the result as `ACTION_API_KEY`; do not reuse or expose the RTT token. Start
+the service locally with `launch-rtt-action.cmd` or:
+
+```powershell
+.venv\Scripts\python -m rtt_app.action_api
+```
+
+Useful local URLs are `http://127.0.0.1:8765/health` and
+`http://127.0.0.1:8765/openapi.json`. ChatGPT cannot call a loopback address, so
+deployment or a tunnel must provide a stable public HTTPS origin. A `Dockerfile`
+is included for a container host. Configure `RTT_TOKEN`, `ACTION_API_KEY`, and
+`ACTION_BASE_URL` as host secrets; never copy `.env` into the image.
+
+After deployment:
+
+1. Open the GPT editor and create an action.
+2. Import `https://YOUR-HOST/openapi.json`.
+3. Select API key authentication, choose Bearer, and enter the same
+   `ACTION_API_KEY` value.
+4. Paste the contents of `GPT_ACTION_INSTRUCTIONS.md` into the GPT instructions.
+5. Test `getRttApiInfo`, `getNextDepartures`, `searchStationServices`, and
+   `getServiceDetails` in the action test panel.
+
+The bridge exposes only these authenticated, read-only routes:
+
+- `GET /v1/departures`
+- `GET /v1/services`
+- `GET /v1/service`
+- `GET /v1/info`
+
+It also serves unauthenticated `/health`, `/openapi.json`, and `/privacy` pages.
+
 Installing the local `rtt` command is optional:
 
 ```powershell

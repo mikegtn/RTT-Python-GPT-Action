@@ -15,6 +15,8 @@ dependencies = []
 [project.scripts]
 rtt = "rtt_app.cli:main"
 rtt-gui = "rtt_app.gui:main"
+rtt-assistant = "rtt_app.assistant_gui:main"
+rtt-action = "rtt_app.action_api:main"
 
 [tool.setuptools.packages.find]
 include = ["rtt_app*"]

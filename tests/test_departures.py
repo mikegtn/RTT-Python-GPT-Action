@@ -60,6 +60,17 @@ class DepartureTests(unittest.TestCase):
         self.assertEqual(board.departures[1].status, "Cancelled")
         self.assertIn("London Waterloo", format_board(board))
 
+    def test_derives_lateness_when_api_omits_lateness_integer(self):
+        class ForecastOnlyClient(FakeClient):
+            def location(self, code, **kwargs):
+                data = super().location(code, **kwargs).data
+                timing = data["services"][0]["temporalData"]["departure"]
+                timing.pop("realtimeAdvertisedLateness")
+                return response({"services": [data["services"][0]]})
+
+        board = next_departures(ForecastOnlyClient(), "Clapham Junction")
+        self.assertEqual(board.departures[0].status, "7 min late")
+
 
 if __name__ == "__main__":
     unittest.main()
