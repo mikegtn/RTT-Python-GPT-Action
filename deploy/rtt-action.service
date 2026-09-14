@@ -10,6 +10,10 @@ Group=www-data
 WorkingDirectory=/opt/rtt-action
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile=/etc/rtt-action.env
+Environment=ACTION_USAGE_FILE=/var/lib/rtt-action/usage.json
+Environment=ACTION_MAP_DIR=/var/lib/rtt-action/maps
+Environment=MOVEBOOK_ROUTE_SCRIPT=/var/www/html/scripts/route_movebook_draft.py
+StateDirectory=rtt-action
 ExecStart=/usr/bin/python3 -m rtt_app.action_api --host 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=5

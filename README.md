@@ -102,8 +102,8 @@ After deployment:
 3. Select API key authentication, choose Bearer, and enter the same
    `ACTION_API_KEY` value.
 4. Paste the contents of `GPT_ACTION_INSTRUCTIONS.md` into the GPT instructions.
-5. Test `getRttApiInfo`, `getNextDepartures`, `searchStationServices`, and
-   `getServiceDetails` in the action test panel.
+5. Test `getRttApiInfo`, `getNextDepartures`, `searchStationServices`,
+   `getServiceDetails`, and `suggestRailRoute` in the action test panel.
 
 The bridge exposes only these authenticated, read-only routes:
 
@@ -111,8 +111,12 @@ The bridge exposes only these authenticated, read-only routes:
 - `GET /v1/services`
 - `GET /v1/service`
 - `GET /v1/info`
+- `GET /v1/usage` — aggregate request counts by endpoint and response status
+- `GET /v1/route` — topology-backed Movebook railway route, mileage, alternatives and map link
 
-It also serves unauthenticated `/health`, `/openapi.json`, and `/privacy` pages.
+It also serves unauthenticated `/health`, `/openapi.json`, `/privacy`, and generated
+`/maps/{id}` route-map pages. Set `MOVEBOOK_ROUTE_SCRIPT` to the Movebook
+`scripts/route_movebook_draft.py` path and `ACTION_MAP_DIR` to a writable map cache.
 
 Installing the local `rtt` command is optional:
 

@@ -1,4 +1,5 @@
 import unittest
+from tempfile import TemporaryDirectory
 
 from rtt_app.action_api import ActionApplication, build_openapi_schema
 
@@ -16,6 +17,28 @@ class FakeTools:
     def get_api_info(self):
         return {"version": "test"}
 
+    def resolve_station(self, value):
+        codes = {"Bristol Temple Meads": "BRI", "London Paddington": "PAD"}
+        return {"name": value, "code": codes.get(value, value)}
+
+
+class FakeRouteEngine:
+    def route(self, origin, destination, via_tiplocs):
+        return {
+            "origin": origin,
+            "destination": destination,
+            "origin_tiploc": "BRSTLTM",
+            "destination_tiploc": "PADTON",
+            "via_tiplocs": via_tiplocs,
+            "mileage": 118.5,
+            "coordinates": [[51.45, -2.58], [51.52, -0.18]],
+            "points": [
+                {"role": "origin", "label": origin, "coordinate": [51.45, -2.58]},
+                {"role": "destination", "label": destination, "coordinate": [51.52, -0.18]},
+            ],
+            "candidates": [{"tiploc": "RDNGSTN", "label": "Reading"}],
+        }
+
 
 class ActionApiTests(unittest.TestCase):
     def setUp(self):
@@ -30,6 +53,15 @@ class ActionApiTests(unittest.TestCase):
         ids = [operation["get"]["operationId"] for operation in schema["paths"].values()]
         self.assertEqual(len(ids), len(set(ids)))
         self.assertIn("getServiceDetails", ids)
+        self.assertIn("getApiUsage", ids)
+        self.assertIn("suggestRailRoute", ids)
+        usage_schema = schema["paths"]["/v1/usage"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        self.assertEqual(
+            usage_schema["properties"]["result"]["properties"]["totalRequests"]["type"],
+            "integer",
+        )
 
     def test_health_and_schema_do_not_require_authentication(self):
         self.assertEqual(self.app.dispatch("GET", "/health", {}, {}).status, 200)
@@ -65,6 +97,47 @@ class ActionApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status, 200)
         self.assertIsNone(response.body["result"]["minutes"])
+
+    def test_usage_reports_aggregate_counts(self):
+        self.app.record_request("/v1/departures", 200)
+        self.app.record_request("/v1/services", 401)
+        self.app.record_request("/health", 200)
+
+        response = self.app.dispatch("GET", "/v1/usage", {}, self.auth)
+
+        self.assertEqual(response.status, 200)
+        usage = response.body["result"]
+        self.assertEqual(usage["totalRequests"], 2)
+        self.assertEqual(usage["requestsByEndpoint"]["/v1/departures"], 1)
+        self.assertEqual(usage["responsesByStatus"], {"200": 1, "401": 1})
+
+    def test_route_returns_movebook_result_and_public_map(self):
+        with TemporaryDirectory() as map_dir:
+            app = ActionApplication(
+                FakeTools(),
+                api_key="secret-test-key",
+                base_url="https://rail.example.com",
+                route_engine=FakeRouteEngine(),
+                map_dir=map_dir,
+            )
+            response = app.dispatch(
+                "GET",
+                "/v1/route",
+                {
+                    "origin": ["Bristol Temple Meads"],
+                    "destination": ["London Paddington"],
+                    "via": ["RDNGSTN"],
+                },
+                self.auth,
+            )
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.body["result"]["via_tiplocs"], ["RDNGSTN"])
+            self.assertEqual(response.body["result"]["originCode"], "BRI")
+            map_url = response.body["result"]["mapUrl"]
+            self.assertTrue(map_url.startswith("https://rail.example.com/maps/"))
+            map_response = app.dispatch("GET", "/maps/" + map_url.rsplit("/", 1)[-1], {}, {})
+            self.assertEqual(map_response.status, 200)
+            self.assertIn("Bristol Temple Meads", map_response.body)
 
 
 if __name__ == "__main__":

@@ -139,6 +139,13 @@ class RTTRailTools:
     def _station_code(self, value: str | None) -> str | None:
         return str(self._station(value)["shortCode"]) if value else None
 
+    def resolve_station(self, value: str) -> dict[str, str]:
+        station = self._station(value)
+        return {
+            "name": str(station.get("description") or value),
+            "code": str(station["shortCode"]),
+        }
+
     def next_departures(self, station: str, count: int, minutes: int) -> dict[str, Any]:
         board = next_departures(self.client, station, limit=count, minutes=minutes)
         return {

@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import html
 import json
 import os
+import re
 import secrets
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
 
 from .cli import load_dotenv
 from .client import RTTClient, RTTError
+from .movebook_route import MovebookRouteEngine, MovebookRouteError
 from .rail_assistant import RTTRailTools
 
 
 MAX_RESPONSE_BYTES = 950_000
+MAP_ID_RE = re.compile(r"^[a-f0-9]{24}$")
 
 
 def _one(params: Mapping[str, list[str]], name: str, default: str | None = None) -> str | None:
@@ -74,6 +81,51 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
             }
         },
     }
+    usage_response = {
+        "description": "Aggregate Action API usage statistics",
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "ok": {"type": "boolean"},
+                        "result": {
+                            "type": "object",
+                            "properties": {
+                                "trackingSince": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "description": "UTC time from which the counters are available.",
+                                },
+                                "lastRequestAt": {
+                                    "type": ["string", "null"],
+                                    "format": "date-time",
+                                    "description": "UTC time of the most recently counted request.",
+                                },
+                                "totalRequests": {"type": "integer", "minimum": 0},
+                                "requestsByEndpoint": {
+                                    "type": "object",
+                                    "additionalProperties": {"type": "integer", "minimum": 0},
+                                },
+                                "responsesByStatus": {
+                                    "type": "object",
+                                    "additionalProperties": {"type": "integer", "minimum": 0},
+                                },
+                            },
+                            "required": [
+                                "trackingSince",
+                                "lastRequestAt",
+                                "totalRequests",
+                                "requestsByEndpoint",
+                                "responsesByStatus",
+                            ],
+                        },
+                    },
+                    "required": ["ok", "result"],
+                }
+            }
+        },
+    }
     error_responses = {
         "400": {
             "description": "Invalid query",
@@ -85,6 +137,10 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
         },
         "502": {
             "description": "RTT upstream API error",
+            "content": {"application/json": {"schema": error}},
+        },
+        "503": {
+            "description": "Route engine unavailable",
             "content": {"application/json": {"schema": error}},
         },
     }
@@ -214,6 +270,55 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                     "responses": {"200": json_response, **error_responses},
                 }
             },
+            "/v1/usage": {
+                "get": {
+                    "operationId": "getApiUsage",
+                    "summary": "Get hosted Action API usage",
+                    "description": (
+                        "Returns aggregate request counts by endpoint and HTTP status. "
+                        "No credentials, query values or client identifiers are returned."
+                    ),
+                    "responses": {"200": usage_response, **error_responses},
+                }
+            },
+            "/v1/route": {
+                "get": {
+                    "operationId": "suggestRailRoute",
+                    "summary": "Suggest a topology-backed railway route and map",
+                    "description": (
+                        "Uses the Movebook railway routing engine to resolve an origin and "
+                        "destination, calculate railway mileage and geometry, and return a map "
+                        "link plus valid alternative via points. This is an infrastructure route, "
+                        "not a timetable, ticket or guaranteed passenger itinerary."
+                    ),
+                    "parameters": [
+                        {
+                            "name": "origin",
+                            "in": "query",
+                            "required": True,
+                            "description": "Origin station name or CRS code.",
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "destination",
+                            "in": "query",
+                            "required": True,
+                            "description": "Destination station name or CRS code.",
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "via",
+                            "in": "query",
+                            "description": (
+                                "Optional comma-separated TIPLOC codes selected from candidates "
+                                "returned by an earlier route call, in travel order."
+                            ),
+                            "schema": {"type": "string"},
+                        },
+                    ],
+                    "responses": {"200": json_response, **error_responses},
+                }
+            },
         },
     }
 
@@ -228,13 +333,103 @@ class ActionResponse:
 class ActionApplication:
     """Request dispatcher, separated from HTTP transport for reliable testing."""
 
-    def __init__(self, tools: RTTRailTools, *, api_key: str, base_url: str) -> None:
+    def __init__(
+        self,
+        tools: RTTRailTools,
+        *,
+        api_key: str,
+        base_url: str,
+        usage_file: str | None = None,
+        route_engine: MovebookRouteEngine | None = None,
+        map_dir: str | None = None,
+    ) -> None:
         if not api_key.strip():
             raise ValueError("ACTION_API_KEY is required")
         self.tools = tools
         self.api_key = api_key.strip()
         self.base_url = base_url.rstrip("/")
         self._lock = threading.RLock()
+        self._usage_file = Path(usage_file) if usage_file else None
+        self._usage = self._load_usage()
+        self.route_engine = route_engine
+        self._map_dir = Path(map_dir) if map_dir else None
+
+    def _load_usage(self) -> dict[str, Any]:
+        empty = {
+            "trackingSince": datetime.now(timezone.utc).isoformat(),
+            "lastRequestAt": None,
+            "totalRequests": 0,
+            "requestsByEndpoint": {},
+            "responsesByStatus": {},
+        }
+        if self._usage_file is None or not self._usage_file.exists():
+            return empty
+        try:
+            loaded = json.loads(self._usage_file.read_text(encoding="utf-8"))
+            if not isinstance(loaded, dict):
+                return empty
+            for key, default in empty.items():
+                loaded.setdefault(key, default)
+            return loaded
+        except (OSError, ValueError, TypeError):
+            return empty
+
+    def _save_usage(self) -> None:
+        if self._usage_file is None:
+            return
+        self._usage_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._usage_file.with_suffix(self._usage_file.suffix + ".tmp")
+        temporary.write_text(json.dumps(self._usage, sort_keys=True), encoding="utf-8")
+        temporary.replace(self._usage_file)
+
+    def record_request(self, path: str, status: int) -> None:
+        """Record aggregate /v1 request data without retaining query or client details."""
+        if not path.startswith("/v1/"):
+            return
+        known_paths = {
+            "/v1/departures", "/v1/services", "/v1/service", "/v1/info", "/v1/usage", "/v1/route"
+        }
+        path = path if path in known_paths else "/v1/other"
+        with self._lock:
+            endpoints = self._usage["requestsByEndpoint"]
+            statuses = self._usage["responsesByStatus"]
+            endpoints[path] = int(endpoints.get(path, 0)) + 1
+            status_key = str(status)
+            statuses[status_key] = int(statuses.get(status_key, 0)) + 1
+            self._usage["totalRequests"] = int(self._usage["totalRequests"]) + 1
+            self._usage["lastRequestAt"] = datetime.now(timezone.utc).isoformat()
+            try:
+                self._save_usage()
+            except OSError:
+                # Usage reporting must never prevent a rail request from succeeding.
+                pass
+
+    def get_usage(self) -> dict[str, Any]:
+        with self._lock:
+            return json.loads(json.dumps(self._usage))
+
+    def _save_route_map(self, route: dict[str, Any]) -> str | None:
+        if self._map_dir is None:
+            return None
+        serialised = json.dumps(route, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        map_id = hashlib.sha256(serialised.encode("utf-8")).hexdigest()[:24]
+        self._map_dir.mkdir(parents=True, exist_ok=True)
+        target = self._map_dir / f"{map_id}.json"
+        if not target.exists():
+            temporary = target.with_suffix(".json.tmp")
+            temporary.write_text(serialised, encoding="utf-8")
+            temporary.replace(target)
+        return f"{self.base_url}/maps/{map_id}"
+
+    def _route_map(self, map_id: str) -> ActionResponse:
+        if self._map_dir is None or not MAP_ID_RE.fullmatch(map_id):
+            return ActionResponse(404, {"ok": False, "error": "Map not found"})
+        source = self._map_dir / f"{map_id}.json"
+        try:
+            route = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ActionResponse(404, {"ok": False, "error": "Map not found"})
+        return ActionResponse(200, _render_route_map(route), "text/html; charset=utf-8")
 
     def _authorized(self, headers: Mapping[str, str]) -> bool:
         authorization = headers.get("Authorization", "")
@@ -257,8 +452,13 @@ class ActionApplication:
                 "<h1>Privacy</h1><p>This private action forwards rail queries to Realtime Trains. "
                 "It does not require or store an OpenAI API key. Server access logs may contain "
                 "request time, IP address and query parameters according to the hosting provider.</p>"
+                "<p>Generated railway maps are stored under unguessable links and contain the "
+                "requested origin, destination, route geometry and selected via points. The map "
+                "files do not contain credentials or client identifiers.</p>"
             )
             return ActionResponse(200, body, "text/html; charset=utf-8")
+        if path.startswith("/maps/"):
+            return self._route_map(path.removeprefix("/maps/"))
         if not path.startswith("/v1/"):
             return ActionResponse(404, {"ok": False, "error": "Not found"})
         if not self._authorized(headers):
@@ -293,6 +493,40 @@ class ActionApplication:
                     )
                 elif path == "/v1/info":
                     result = self.tools.get_api_info()
+                elif path == "/v1/usage":
+                    result = self.get_usage()
+                elif path == "/v1/route":
+                    if self.route_engine is None:
+                        return ActionResponse(503, {"ok": False, "error": "Route engine unavailable"})
+                    via = [code for code in (_one(params, "via", "") or "").split(",") if code.strip()]
+                    origin_station = self.tools.resolve_station(
+                        _one(params, "origin") or _required("origin")
+                    )
+                    destination_station = self.tools.resolve_station(
+                        _one(params, "destination") or _required("destination")
+                    )
+                    origin_label = origin_station["name"]
+                    destination_label = destination_station["name"]
+                    origin_lookup = (
+                        origin_label
+                        if origin_label.casefold().endswith("rail station")
+                        else f"{origin_label} Rail Station"
+                    )
+                    destination_lookup = (
+                        destination_label
+                        if destination_label.casefold().endswith("rail station")
+                        else f"{destination_label} Rail Station"
+                    )
+                    result = self.route_engine.route(
+                        origin_lookup,
+                        destination_lookup,
+                        via,
+                    )
+                    result["origin"] = origin_label
+                    result["destination"] = destination_label
+                    result["originCode"] = origin_station["code"]
+                    result["destinationCode"] = destination_station["code"]
+                    result["mapUrl"] = self._save_route_map(result)
                 else:
                     return ActionResponse(404, {"ok": False, "error": "Not found"})
             body = {"ok": True, "result": result}
@@ -303,6 +537,25 @@ class ActionApplication:
             return ActionResponse(400, {"ok": False, "error": str(exc)})
         except RTTError as exc:
             return ActionResponse(502, {"ok": False, "error": str(exc)})
+        except MovebookRouteError as exc:
+            return ActionResponse(502, {"ok": False, "error": str(exc)})
+
+
+def _render_route_map(route: Mapping[str, Any]) -> str:
+    title = f"{route.get('origin', 'Rail route')} to {route.get('destination', '')}".strip()
+    route_json = json.dumps(route, ensure_ascii=False).replace("<", "\\u003c")
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://unpkg.com; script-src 'unsafe-inline' https://unpkg.com; img-src data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org">
+<title>{html.escape(title)}</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>html,body,#map{{height:100%;margin:0}} .summary{{position:absolute;z-index:1000;left:56px;right:12px;top:12px;max-width:640px;background:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 2px 12px #0004;font:15px system-ui}} .summary strong{{display:block}}</style></head>
+<body><div class="summary"><strong>{html.escape(title)}</strong>{html.escape(str(route.get('mileage', '?')))} railway miles · topology-based suggested route</div><div id="map" role="img" aria-label="Interactive map of the suggested railway route"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
+const data={route_json}; const map=L.map('map'); L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',{{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}}).addTo(map);
+const line=L.polyline(data.coordinates||[],{{color:'#6f42c1',weight:5}}).addTo(map); const esc=s=>String(s).replace(/[&<>\"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}}[c]));
+(data.points||[]).forEach(p=>L.circleMarker(p.coordinate,{{radius:p.role==='via'?6:8,color:p.role==='via'?'#6f42c1':'#111',fillOpacity:1}}).addTo(map).bindTooltip(esc(p.label||p.tiploc)));
+if(line.getLatLngs().length) map.fitBounds(line.getBounds(),{{padding:[30,30]}}); else map.setView([54.5,-3],6);
+</script></body></html>"""
 
 
 def _required(name: str) -> str:
@@ -318,6 +571,7 @@ def make_handler(application: ActionApplication) -> type[BaseHTTPRequestHandler]
             response = application.dispatch(
                 "GET", parsed.path.rstrip("/") or "/", parse_qs(parsed.query), self.headers
             )
+            application.record_request(parsed.path.rstrip("/") or "/", response.status)
             if isinstance(response.body, str):
                 payload = response.body.encode("utf-8")
             else:
@@ -355,6 +609,16 @@ def create_application() -> ActionApplication:
         RTTRailTools(client),
         api_key=action_key,
         base_url=os.environ.get("ACTION_BASE_URL", "http://127.0.0.1:8765"),
+        usage_file=os.environ.get("ACTION_USAGE_FILE"),
+        route_engine=(
+            MovebookRouteEngine(
+                os.environ["MOVEBOOK_ROUTE_SCRIPT"],
+                python=os.environ.get("MOVEBOOK_PYTHON", "/usr/bin/python3"),
+            )
+            if os.environ.get("MOVEBOOK_ROUTE_SCRIPT")
+            else None
+        ),
+        map_dir=os.environ.get("ACTION_MAP_DIR"),
     )
 
 
