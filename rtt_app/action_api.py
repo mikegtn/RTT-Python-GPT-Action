@@ -21,6 +21,8 @@ from .cli import load_dotenv
 from .client import RTTClient, RTTError
 from .movebook_route import MovebookRouteEngine, MovebookRouteError
 from .rail_assistant import RTTRailTools
+from .tiger import TigerClient, TigerError, reconcile_rtt_tiger, validate_lookup
+from .tiger_schema import tiger_operation
 
 
 MAX_RESPONSE_BYTES = 950_000
@@ -159,9 +161,14 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                 "Read live and scheduled UK rail services, allocations and Know Your Train "
                 "coach data from the Realtime Trains API. Data can be absent or change."
             ),
-            "version": "1.0.0",
+            "version": "1.1.0",
         },
         "servers": [{"url": server}],
+        "security": [{"bearerAuth": []}, {"actionKey": []}],
+        "components": {"securitySchemes": {
+            "bearerAuth": {"type": "http", "scheme": "bearer"},
+            "actionKey": {"type": "apiKey", "in": "header", "name": "X-Action-Key"},
+        }},
         "paths": {
             "/v1/departures": {
                 "get": {
@@ -242,6 +249,7 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                     "responses": {"200": json_response, **error_responses},
                 }
             },
+            "/v1/tiger/service": {"get": tiger_operation(error_responses)},
             "/v1/service": {
                 "get": {
                     "operationId": "getServiceDetails",
@@ -342,6 +350,7 @@ class ActionApplication:
         usage_file: str | None = None,
         route_engine: MovebookRouteEngine | None = None,
         map_dir: str | None = None,
+        tiger_client: TigerClient | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("ACTION_API_KEY is required")
@@ -352,6 +361,7 @@ class ActionApplication:
         self._usage_file = Path(usage_file) if usage_file else None
         self._usage = self._load_usage()
         self.route_engine = route_engine
+        self.tiger_client = tiger_client
         self._map_dir = Path(map_dir) if map_dir else None
 
     def _load_usage(self) -> dict[str, Any]:
@@ -387,7 +397,7 @@ class ActionApplication:
         if not path.startswith("/v1/"):
             return
         known_paths = {
-            "/v1/departures", "/v1/services", "/v1/service", "/v1/info", "/v1/usage", "/v1/route"
+            "/v1/departures", "/v1/services", "/v1/service", "/v1/info", "/v1/usage", "/v1/route", "/v1/tiger/service"
         }
         path = path if path in known_paths else "/v1/other"
         with self._lock:
@@ -491,6 +501,18 @@ class ActionApplication:
                     result = self.tools.get_service_details(
                         _one(params, "unique_identity") or _required("unique_identity")
                     )
+                elif path == "/v1/tiger/service":
+                    station = _one(params, "station") or _required("station")
+                    uid = _one(params, "uid") or _required("uid")
+                    departure_date = _one(params, "departure_date")
+                    station = validate_lookup(station, uid, departure_date)
+                    if self.tiger_client is None:
+                        return ActionResponse(503, {"ok": False, "error": "TIGER is not configured"})
+                    result = self.tiger_client.get_service_details(station, uid, departure_date)
+                    unique_identity = _one(params, "unique_identity")
+                    if unique_identity:
+                        rtt = self.tools.get_service_details(unique_identity)
+                        result = reconcile_rtt_tiger(rtt, result, station)
                 elif path == "/v1/info":
                     result = self.tools.get_api_info()
                 elif path == "/v1/usage":
@@ -535,6 +557,8 @@ class ActionApplication:
             return ActionResponse(200, body)
         except (ValueError, TypeError) as exc:
             return ActionResponse(400, {"ok": False, "error": str(exc)})
+        except TigerError as exc:
+            return ActionResponse(exc.status, {"ok": False, "error": str(exc)})
         except RTTError as exc:
             return ActionResponse(502, {"ok": False, "error": str(exc)})
         except MovebookRouteError as exc:
@@ -619,6 +643,13 @@ def create_application() -> ActionApplication:
             else None
         ),
         map_dir=os.environ.get("ACTION_MAP_DIR"),
+        tiger_client=(
+            TigerClient(
+                os.environ["TIGER_API_KEY"],
+                base_url=os.environ.get("TIGER_BASE_URL", "https://tiger-api-portal.worldline.global"),
+                timeout=float(os.environ.get("TIGER_TIMEOUT", "15")),
+            ) if os.environ.get("TIGER_API_KEY", "").strip() else None
+        ),
     )
 
 

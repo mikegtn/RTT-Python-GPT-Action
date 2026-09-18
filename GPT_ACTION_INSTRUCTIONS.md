@@ -53,3 +53,19 @@ Suggested conversation starters:
 - What is allocated to the 18:36 Paddington to Castle Cary today?
 - Which arriving train forms that service?
 - Does this service include KYT coach letters or First Class formation data?
+
+## TIGER coach evidence
+
+Use `getTigerServiceDetails` after RTT has identified the service. Pass the exact
+RTT UID and a CRS/TIPLOC station code (not a station name). When available, pass
+the RTT departure date and the exact `uniqueIdentity` as `unique_identity` for
+reconciliation. Never construct an opaque RTT identity.
+
+RTT remains authoritative for dated identity, live times, platform, status,
+route and allocations. TIGER supplements passenger-facing coach facilities;
+it does not establish a rolling-stock unit identity. Report source disagreements
+and do not silently overwrite RTT. A missing facility is **not indicated**, not
+proof of absence. State front/rear only when `orientationKnown` is true. Coach
+letters and First Class position do not establish direction. If `dateVerified`
+is false, describe TIGER as unverified station-board evidence, not a confirmed
+formation for the dated service. Preserve this distinction around midnight.

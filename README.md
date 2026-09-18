@@ -182,3 +182,65 @@ Tests mock the network and never require or expose a real token.
 - <https://realtimetrains.github.io/api-specification/>
 - <https://github.com/realtimetrains/api-specification>
 - <https://api-portal.rtt.io/>
+
+## TIGER coach integration
+
+`GET /v1/tiger/service` (`getTigerServiceDetails`) uses the existing Action
+Bearer or `X-Action-Key` authentication. Required parameters: `station` (CRS or
+TIPLOC) and `uid` (the exact RTT UID). Optional `departure_date` (`YYYY-MM-DD`)
+and `unique_identity` (copied from RTT) enable explicit date checking and RTT
+reconciliation. The response is `{ok, result}`; supplying `unique_identity`
+returns separate `rtt` and `tiger` evidence plus authority, conflicts and warnings.
+
+Set `TIGER_API_KEY` only in the server environment or `/etc/rtt-action.env`.
+Optional settings are `TIGER_BASE_URL` (default
+`https://tiger-api-portal.worldline.global`) and `TIGER_TIMEOUT` (15 seconds,
+maximum 60). Changing the base URL sends the credential to that configured
+HTTPS host, so use only a trusted provider endpoint. The client sends the key
+in `x-api-key`, never a URL, and refuses redirects. Error bodies are not returned.
+Without the key, only the TIGER endpoint is disabled (503).
+
+The client fetches `/services/{station}` and selects exactly one `UID` match.
+No match returns 404, duplicate matches 409, and upstream failures or malformed
+payloads 502. It accepts a service array or `Services`/`services` wrapper.
+These envelope adapters and the optional `DepartureDate` field still need
+validation against an authenticated live response; no date is invented when
+that field is absent. Tests use synthetic fixtures derived from the agreed
+CoachList example, not a captured live response.
+
+Coach normalization preserves `rawService` and `rawCoachList`, sorts unique
+positive `CoachNumber` values, and uses consistent `LeadingPowerCar` or
+`TrailingPowerCar` end markers for front-to-rear order. Absent, conflicting or
+internal markers leave orientation unknown. Missing facilities remain null
+("not indicated"). Empty/missing lists do not mean a zero-coach train.
+
+Reconciliation requires exact dated RTT identity and station membership.
+Unverified dates never produce confirmed enrichment. RTT data remains intact;
+TIGER never replaces operational fields or allocation identities. A mismatch
+between the station's RTT `passengerVehicles` and TIGER coach count is reported
+with both values and blocks confirmed enrichment. Other raw upstream fields
+remain available as evidence; undocumented fields are not automatically merged
+or interpreted as operational conflicts.
+
+### Updating the existing systemd deployment
+
+The existing service runs from `/opt/rtt-action`, loading `/etc/rtt-action.env`.
+Do **not** rerun `deploy/install.sh` for an upgrade: it is a first-install script.
+Deploy the reviewed commit through the server's existing release process, add
+`TIGER_API_KEY` to the protected environment file without printing it, then:
+
+```sh
+cd /opt/rtt-action
+python3 -m unittest discover -v
+sudo systemctl restart rtt-action.service
+sudo systemctl is-active rtt-action.service
+sudo python3 deploy/verify_tiger.py --station PAD
+```
+
+The verification command checks the published OpenAPI operation, discovers an
+exact live RTT UID at the station, then requests TIGER evidence. It reads the
+Action key from the environment file into memory and prints only safe summary
+fields. It never prints either key or upstream error bodies. It exits nonzero
+if no candidate has coach data; try a station served by an operator publishing
+formations. A successful response with `dateVerified=false` verifies the
+transport and coach extraction only, not a dated RTT reconciliation.
