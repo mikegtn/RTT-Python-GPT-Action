@@ -17,7 +17,8 @@ class NoRedirect(HTTPRedirectHandler):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--station', default='PAD')
+    parser.add_argument('--station', default='PAD', help='RTT station name or CRS code')
+    parser.add_argument('--tiger-station', help='Explicit TIGER TIPLOC, e.g. PADTON; otherwise resolve from RTT calls')
     parser.add_argument('--env-file', type=Path, default=Path('/etc/rtt-action.env'))
     args = parser.parse_args()
     config = dict(os.environ)
@@ -55,7 +56,8 @@ def main():
         attempted += 1
         try:
             result = get('/v1/tiger/service', {'station': args.station, 'uid': match[1],
-                         'departure_date': match[2], 'unique_identity': identity})
+                         'departure_date': match[2], 'unique_identity': identity,
+                         **({'tiploc': args.tiger_station} if args.tiger_station else {})})
         except HTTPError as error:
             code = error.code
             error.close()
@@ -65,7 +67,7 @@ def main():
         reconciled = result.get('result', {})
         tiger = reconciled.get('tiger', {})
         if result.get('ok') and tiger.get('coaches'):
-            print(json.dumps({'uid': match[1], 'station': args.station,
+            print(json.dumps({'uid': match[1], 'rttStation': args.station, 'tigerStation': tiger.get('station'),
                   'totalCoaches': tiger.get('totalCoaches'),
                   'orientationKnown': tiger.get('orientationKnown'),
                   'dateVerified': tiger.get('dateVerified'),

@@ -39,6 +39,40 @@ def validate_lookup(station: str, uid: str, departure_date: str | None = None):
     return station
 
 
+
+def resolve_tiger_tiploc(station: str, rtt: dict[str, Any] | None = None,
+                         tiploc: str | None = None) -> str:
+    """Resolve CRS using the selected RTT service, never by guessing a mapping.
+
+    An explicit TIPLOC also supports short TIPLOCs or missing RTT reference data.
+    If RTT supplies both codes, reject an explicit code for a different call.
+    """
+    station = validate_lookup(station, 'A00000')
+    explicit = validate_lookup(tiploc, 'A00000') if tiploc else None
+    matches = []
+    for call in (rtt or {}).get('calls') or []:
+        location = call.get('location') or {}
+        short = location.get('shortCodes') or []
+        long = location.get('longCodes') or []
+        if station in short + long:
+            matches.append(long)
+    candidates = {code for codes in matches for code in codes
+                  if isinstance(code, str) and re.fullmatch(r'[A-Z0-9]{3,7}', code)}
+    if explicit:
+        if candidates and explicit not in candidates:
+            raise ValueError('tiploc does not match the requested RTT station')
+        if not matches and len(station) > 3 and explicit != station:
+            raise ValueError('tiploc conflicts with the supplied station TIPLOC')
+        return explicit
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    if len(candidates) > 1:
+        raise ValueError('Multiple TIPLOCs match this RTT station; supply tiploc explicitly')
+    if len(station) > 3:
+        return station
+    raise ValueError('TIGER requires a TIPLOC: supply tiploc, or unique_identity so RTT can resolve the CRS code')
+
+
 def _flag(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
@@ -137,6 +171,12 @@ class TigerClient:
         except (ValueError, UnicodeError):
             raise TigerError('TIGER returned invalid JSON') from None
         if isinstance(payload, dict):
+            # TIGER uses HTTP 200 for application-level failures as well.
+            # Never relay upstream detail: it may echo credentials or input.
+            if payload.get('name') == 'NotFound':
+                raise TigerError('TIGER location not found; check the station TIPLOC', 404)
+            if 'name' in payload and 'detail' in payload:
+                raise TigerError('TIGER returned an application error')
             payload = payload.get('Services', payload.get('services'))
         if not isinstance(payload, list) or any(not isinstance(s, dict) for s in payload):
             raise TigerError('TIGER returned an unsupported services payload')
@@ -165,7 +205,8 @@ class TigerClient:
         return result
 
 
-def reconcile_rtt_tiger(rtt: dict[str, Any], tiger: dict[str, Any], station: str) -> dict[str, Any]:
+def reconcile_rtt_tiger(rtt: dict[str, Any], tiger: dict[str, Any], station: str,
+                        *, requested_station: str | None = None) -> dict[str, Any]:
     """Keep RTT intact; apply coach enrichment only after UID/date/station checks.
 
     ``rtt`` is get_service_details output. Unknown dates or station membership
@@ -176,7 +217,10 @@ def reconcile_rtt_tiger(rtt: dict[str, Any], tiger: dict[str, Any], station: str
     expected = f"{tiger['uid']}:{tiger.get('departureDate')}"
     calls = [c for c in rtt.get('calls', []) if station in (
         ((c.get('location') or {}).get('shortCodes') or []) +
-        ((c.get('location') or {}).get('longCodes') or []))]
+        ((c.get('location') or {}).get('longCodes') or []))
+        and (requested_station is None or requested_station in (
+            ((c.get('location') or {}).get('shortCodes') or []) +
+            ((c.get('location') or {}).get('longCodes') or [])))]
     matched = identity == expected and tiger.get('dateVerified') is True and tiger['station'] == station and len(calls) == 1
     conflicts = []
     if matched:

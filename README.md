@@ -186,8 +186,11 @@ Tests mock the network and never require or expose a real token.
 ## TIGER coach integration
 
 `GET /v1/tiger/service` (`getTigerServiceDetails`) uses the existing Action
-Bearer or `X-Action-Key` authentication. Required parameters: `station` (CRS or
-TIPLOC) and `uid` (the exact RTT UID). Optional `departure_date` (`YYYY-MM-DD`)
+Bearer or `X-Action-Key` authentication. Required parameters: `station` and `uid` (the exact RTT UID). TIGER requires
+a TIPLOC, such as `PADTON`, rather than the RTT CRS code `PAD`. A CRS `station`
+is resolved from the selected RTT service when `unique_identity` is supplied.
+Alternatively supply `tiploc=PADTON` explicitly alongside `station=PAD`.
+Ambiguous or unresolved CRS mappings return 400; they are never guessed. Optional `departure_date` (`YYYY-MM-DD`)
 and `unique_identity` (copied from RTT) enable explicit date checking and RTT
 reconciliation. The response is `{ok, result}`; supplying `unique_identity`
 returns separate `rtt` and `tiger` evidence plus authority, conflicts and warnings.
@@ -202,7 +205,9 @@ Without the key, only the TIGER endpoint is disabled (503).
 
 The client fetches `/services/{station}` and selects exactly one `UID` match.
 No match returns 404, duplicate matches 409, and upstream failures or malformed
-payloads 502. It accepts a service array or `Services`/`services` wrapper.
+payloads 502. TIGER HTTP-200 `{name: "NotFound", detail: ...}` responses are
+translated to a safe 404; other application errors return 502 without echoing
+upstream detail. It accepts a service array or `Services`/`services` wrapper.
 These envelope adapters and the optional `DepartureDate` field still need
 validation against an authenticated live response; no date is invented when
 that field is absent. Tests use synthetic fixtures derived from the agreed
@@ -234,7 +239,7 @@ cd /opt/rtt-action
 python3 -m unittest discover -v
 sudo systemctl restart rtt-action.service
 sudo systemctl is-active rtt-action.service
-sudo python3 deploy/verify_tiger.py --station PAD
+sudo python3 deploy/verify_tiger.py --station PAD --tiger-station PADTON
 ```
 
 The verification command checks the published OpenAPI operation, discovers an
@@ -244,3 +249,12 @@ fields. It never prints either key or upstream error bodies. It exits nonzero
 if no candidate has coach data; try a station served by an operator publishing
 formations. A successful response with `dateVerified=false` verifies the
 transport and coach extraction only, not a dated RTT reconciliation.
+
+For the existing `/opt/rtt-action` deployment, `deploy/update_tiger.sh COMMIT_SHA`
+stages a pinned release, runs its tests, backs up the existing installation,
+creates the deployment directory if absent, installs the TIGER-related Python
+files and restarts the service. It restores the backup if installation or the
+local health check fails. It preserves `/etc/rtt-action.env` and never prints
+credentials. Run the live verifier separately after the update: `--station`
+selects the RTT station; `--tiger-station` explicitly selects its TIGER TIPLOC.
+Omit `--tiger-station` to test automatic resolution from RTT calls.

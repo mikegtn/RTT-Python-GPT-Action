@@ -21,7 +21,7 @@ from .cli import load_dotenv
 from .client import RTTClient, RTTError
 from .movebook_route import MovebookRouteEngine, MovebookRouteError
 from .rail_assistant import RTTRailTools
-from .tiger import TigerClient, TigerError, reconcile_rtt_tiger, validate_lookup
+from .tiger import TigerClient, TigerError, reconcile_rtt_tiger, validate_lookup, resolve_tiger_tiploc
 from .tiger_schema import tiger_operation
 
 
@@ -508,11 +508,12 @@ class ActionApplication:
                     station = validate_lookup(station, uid, departure_date)
                     if self.tiger_client is None:
                         return ActionResponse(503, {"ok": False, "error": "TIGER is not configured"})
-                    result = self.tiger_client.get_service_details(station, uid, departure_date)
                     unique_identity = _one(params, "unique_identity")
-                    if unique_identity:
-                        rtt = self.tools.get_service_details(unique_identity)
-                        result = reconcile_rtt_tiger(rtt, result, station)
+                    rtt = self.tools.get_service_details(unique_identity) if unique_identity else None
+                    tiploc = resolve_tiger_tiploc(station, rtt, _one(params, "tiploc"))
+                    result = self.tiger_client.get_service_details(tiploc, uid, departure_date)
+                    if rtt is not None:
+                        result = reconcile_rtt_tiger(rtt, result, tiploc, requested_station=station)
                 elif path == "/v1/info":
                     result = self.tools.get_api_info()
                 elif path == "/v1/usage":

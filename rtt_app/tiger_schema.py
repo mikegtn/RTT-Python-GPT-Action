@@ -33,13 +33,17 @@ def tiger_operation(errors):
         'operationId': 'getTigerServiceDetails',
         'summary': 'Get TIGER coach evidence for an exact RTT UID at a station',
         'description': (
-            'First establish the dated service with RTT. Use a CRS/TIPLOC code and its exact UID. '
+            'First establish the dated service with RTT. TIGER requires a TIPLOC and exact UID. '
+            'A CRS station requires unique_identity for RTT-based resolution, or an explicit tiploc. '
             'TIGER supplies passenger facilities only; RTT remains authoritative for identity, times, '
             'platform, status, route and allocation. Missing flags mean not indicated. '
             'Do not infer orientation from letters or class. An unverified date prevents dated enrichment. '
             'Supply unique_identity to return RTT and TIGER evidence with reconciliation warnings.'),
         'parameters': [
             {'name': 'station', 'in': 'query', 'required': True,
+             'schema': {'type': 'string', 'pattern': '^[A-Za-z0-9]{3,7}$'}},
+            {'name': 'tiploc', 'in': 'query', 'required': False,
+             'description': 'Explicit TIGER TIPLOC, for example PADTON for RTT CRS PAD. Never send CRS as TIPLOC.',
              'schema': {'type': 'string', 'pattern': '^[A-Za-z0-9]{3,7}$'}},
             {'name': 'uid', 'in': 'query', 'required': True,
              'schema': {'type': 'string', 'pattern': '^[A-Z][0-9]{5}$'}},
@@ -51,7 +55,7 @@ def tiger_operation(errors):
              'schema': {'type': 'string'}},
         ],
         'responses': {**errors,
-            '404': {'description': 'No exact UID/date match at this station'},
+            '404': {'description': 'TIGER location not found, or no exact UID/date match'},
             '409': {'description': 'Multiple matching TIGER services; no selection made'},
             '502': {'description': 'TIGER or RTT upstream error'},
             '503': {'description': 'TIGER is not configured'},

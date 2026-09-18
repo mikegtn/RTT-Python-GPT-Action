@@ -57,7 +57,10 @@ Suggested conversation starters:
 ## TIGER coach evidence
 
 Use `getTigerServiceDetails` after RTT has identified the service. Pass the exact
-RTT UID and a CRS/TIPLOC station code (not a station name). When available, pass
+RTT UID and a TIPLOC station code (not a station name). TIGER requires TIPLOC,
+e.g. PADTON, not CRS PAD. A CRS can be passed with `unique_identity` to resolve
+the TIPLOC from RTT calls, or with an explicit `tiploc`. If resolution fails,
+request the TIPLOC rather than guessing. When available, pass
 the RTT departure date and the exact `uniqueIdentity` as `unique_identity` for
 reconciliation. Never construct an opaque RTT identity.
 
