@@ -36,14 +36,10 @@ def tiger_operation(errors):
         'operationId': 'getTigerServiceDetails',
         'summary': 'Get TIGER coach evidence for an exact RTT UID at a station',
         'description': (
-            'First establish the dated service with RTT. TIGER requires a TIPLOC and exact UID. '
-            'A CRS station requires unique_identity for RTT-based resolution, or an explicit tiploc. '
-            'TIGER supplies passenger facilities only; RTT remains authoritative for identity, times, '
-            'platform, status, route and allocation. Missing flags mean not indicated. '
-            'Do not infer orientation from letters or class. Date evidence uses scheduled origin departure '
-            'timestamps in Europe/London; station and forecast timestamps do not establish service dates. '
-            'An unverified date prevents dated enrichment. '
-            'Supply unique_identity to return RTT and TIGER evidence with reconciliation warnings.'),
+            'Get coach facilities for an exact RTT UID at a TIPLOC. Supply unique_identity '
+            'to resolve a CRS and reconcile with RTT; pass departure_date to verify the date. '
+            'RTT remains authoritative for operational data. Missing facilities and unknown '
+            'orientation must not be inferred.'),
         'parameters': [
             {'name': 'station', 'in': 'query', 'required': True,
              'schema': {'type': 'string', 'pattern': '^[A-Za-z0-9]{3,7}$'}},

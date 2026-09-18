@@ -63,6 +63,18 @@ class ActionApiTests(unittest.TestCase):
             "integer",
         )
 
+    def test_schema_meets_reported_gpt_action_import_constraints(self):
+        schema = build_openapi_schema("https://rail.example.com")
+        self.assertIsInstance(schema["components"]["schemas"], dict)
+        self.assertEqual(schema["components"]["securitySchemes"], {
+            "bearerAuth": {"type": "http", "scheme": "bearer"},
+        })
+        self.assertEqual(schema["security"], [{"bearerAuth": []}])
+        for path, methods in schema["paths"].items():
+            for method, operation in methods.items():
+                with self.subTest(path=path, method=method):
+                    self.assertLessEqual(len(operation.get("description", "")), 300)
+
     def test_health_and_schema_do_not_require_authentication(self):
         self.assertEqual(self.app.dispatch("GET", "/health", {}, {}).status, 200)
         self.assertEqual(self.app.dispatch("GET", "/openapi.json", {}, {}).status, 200)

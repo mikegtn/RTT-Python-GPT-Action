@@ -161,13 +161,12 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                 "Read live and scheduled UK rail services, allocations and Know Your Train "
                 "coach data from the Realtime Trains API. Data can be absent or change."
             ),
-            "version": "1.1.0",
+            "version": "1.1.1",
         },
         "servers": [{"url": server}],
-        "security": [{"bearerAuth": []}, {"actionKey": []}],
-        "components": {"securitySchemes": {
+        "security": [{"bearerAuth": []}],
+        "components": {"schemas": {}, "securitySchemes": {
             "bearerAuth": {"type": "http", "scheme": "bearer"},
-            "actionKey": {"type": "apiKey", "in": "header", "name": "X-Action-Key"},
         }},
         "paths": {
             "/v1/departures": {
