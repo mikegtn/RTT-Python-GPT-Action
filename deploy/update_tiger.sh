@@ -36,7 +36,7 @@ cp -a /opt/rtt-action/. "$backup/"
 echo "Backup: $backup"
 changed=1
 install -d -m 0755 /opt/rtt-action/deploy
-for file in action_api.py tiger.py tiger_schema.py; do
+for file in action_api.py tiger.py tiger_schema.py tiger_icons.py; do
     install -m 0644 "$stage/source/rtt_app/$file" "/opt/rtt-action/rtt_app/$file"
 done
 install -m 0644 "$stage/source/deploy/verify_tiger.py" /opt/rtt-action/deploy/verify_tiger.py

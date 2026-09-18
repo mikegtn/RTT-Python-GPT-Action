@@ -5,6 +5,9 @@ def tiger_operation(errors):
     nullable_label = {'type': ['string', 'null']}
     coach = {'type': 'object', 'properties': {
         'coachNumber': {'type': ['integer', 'null']}, 'coachLetter': nullable_label,
+        'position': {'type': 'string', 'enum': ['front', 'intermediate', 'rear', 'unknown', 'frontAndRear']},
+        'iconUrl': {'type': 'string', 'format': 'uri',
+                    'description': 'Small public SVG carriage icon. Render as a Markdown image beside the coach letter; position is schematic, not a vehicle model.'},
         **{name: {'type': ['boolean', 'null']} for name in (
             'leadingPowerCar', 'trailingPowerCar', 'firstClass', 'standardClass',
             'wheelchairs', 'bikeStorage', 'catering')},

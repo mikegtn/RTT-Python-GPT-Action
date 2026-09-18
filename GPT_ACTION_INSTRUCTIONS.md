@@ -79,3 +79,16 @@ Do not substitute station-call, expected, board or processing dates. Conflicting
 origin dates remain unverified. Paddington CRS PAD covers PADTON and PADTLL;
 resolve the TIPLOC from the particular RTT service rather than assuming one.
 A successful lookup without CoachList means coach facilities are not indicated.
+
+## Coach icons
+
+When presenting TIGER coach information, render each returned `iconUrl` as a
+Markdown image beside its coach letter, in the returned coach order. Use a
+compact table with columns Icon, Coach, Position and Facilities. The small SVG
+symbols show a left-facing nose at the front, square ends for intermediates,
+and a right-facing nose at the rear. These are schematic position symbols,
+not evidence of a particular train class or physical cab on each vehicle.
+When `position=unknown`, say orientation is unknown and retain the neutral
+symbol. A single coach with known orientation uses `frontAndRear`. If the client
+cannot display images, retain textual position labels rather than inventing
+directional emoji. Preserve all date/reconciliation warnings alongside icons.

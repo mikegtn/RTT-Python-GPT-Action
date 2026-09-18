@@ -271,3 +271,14 @@ local health check fails. It preserves `/etc/rtt-action.env` and never prints
 credentials. Run the live verifier separately after the update: `--station`
 selects the RTT station; `--tiger-station` explicitly selects its TIGER TIPLOC.
 Omit `--tiger-station` to test automatic resolution from RTT calls.
+
+### Coach icons
+
+Normalized TIGER coaches include `position` (front/intermediate/rear/unknown, or
+frontAndRear for a single oriented coach). The HTTP API adds an absolute
+`iconUrl` for each coach. Public, credential-free `/icons/coach-*.svg` routes
+serve fixed 48×24 SVG symbols: front facing left, square-ended intermediate,
+rear facing right. Unknown positions use the neutral symbol without claiming
+an intermediate position. These are schematic icons, not vehicle types.
+Raw coach evidence is unchanged. Image rendering depends on the consuming
+client; GPT instructions request Markdown images beside coach letters.

@@ -117,6 +117,13 @@ def normalize_coach_list(raw: Any) -> dict[str, Any]:
     known = ordered and (forward or reverse)
     if known and reverse and not forward:
         coaches.reverse()
+    for index, coach in enumerate(coaches):
+        coach['position'] = (
+            'unknown' if not known else
+            'frontAndRear' if len(coaches) == 1 else
+            'front' if index == 0 else
+            'rear' if index == len(coaches) - 1 else 'intermediate'
+        )
     warnings = []
     if coaches and not known:
         warnings.append('Orientation unknown: no unambiguous end markers and coach order.')

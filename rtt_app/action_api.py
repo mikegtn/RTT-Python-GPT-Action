@@ -23,6 +23,7 @@ from .movebook_route import MovebookRouteEngine, MovebookRouteError
 from .rail_assistant import RTTRailTools
 from .tiger import TigerClient, TigerError, reconcile_rtt_tiger, validate_lookup, resolve_tiger_tiploc
 from .tiger_schema import tiger_operation
+from .tiger_icons import ICONS, add_coach_icons
 
 
 MAX_RESPONSE_BYTES = 950_000
@@ -161,7 +162,7 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                 "Read live and scheduled UK rail services, allocations and Know Your Train "
                 "coach data from the Realtime Trains API. Data can be absent or change."
             ),
-            "version": "1.1.1",
+            "version": "1.2.0",
         },
         "servers": [{"url": server}],
         "security": [{"bearerAuth": []}],
@@ -455,6 +456,11 @@ class ActionApplication:
             return ActionResponse(200, {"ok": True, "service": "rtt-gpt-action"})
         if path == "/openapi.json":
             return ActionResponse(200, build_openapi_schema(self.base_url))
+        if path.startswith("/icons/coach-") and path.endswith(".svg"):
+            name = path.removeprefix("/icons/coach-").removesuffix(".svg")
+            if name in ICONS:
+                return ActionResponse(200, ICONS[name], "image/svg+xml; charset=utf-8")
+            return ActionResponse(404, {"ok": False, "error": "Icon not found"})
         if path == "/privacy":
             body = (
                 "<!doctype html><title>RTT Rail Action privacy</title>"
@@ -510,7 +516,9 @@ class ActionApplication:
                     unique_identity = _one(params, "unique_identity")
                     rtt = self.tools.get_service_details(unique_identity) if unique_identity else None
                     tiploc = resolve_tiger_tiploc(station, rtt, _one(params, "tiploc"))
-                    result = self.tiger_client.get_service_details(tiploc, uid, departure_date)
+                    result = add_coach_icons(
+                        self.tiger_client.get_service_details(tiploc, uid, departure_date), self.base_url
+                    )
                     if rtt is not None:
                         result = reconcile_rtt_tiger(rtt, result, tiploc, requested_station=station)
                 elif path == "/v1/info":
