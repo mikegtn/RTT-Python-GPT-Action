@@ -312,3 +312,81 @@ class ReconciliationStationRegressionTests(unittest.TestCase):
                  'departureDate': '2026-09-18', 'dateVerified': True, 'station': 'BRSTLTM'}
         result = reconcile_rtt_tiger(rtt, tiger, 'BRSTLTM', requested_station='PAD')
         self.assertFalse(result['coachEnrichmentApplied'])
+
+
+class OriginDateTests(unittest.TestCase):
+    def lookup(self, items, day='2026-09-18'):
+        client = TigerClient('synthetic-test-secret')
+        client.services = Mock(return_value=items)
+        return client.get_service_details('BRSTLTM', 'G15496', day)
+
+    def item(self, stamp='2026-09-18T09:50+01:00'):
+        # Scheduled date fields observed for G15496 in the supplied diagnostic.
+        return {'UID': 'G15496', 'Origins': {'Front': {'DepTimestamp': stamp}},
+                'DepTimestamp': '2026-09-18T11:29+01:00',
+                'ExpectedDepTimestamp': '2026-09-18T11:56+01:00',
+                'CoachList': service()['CoachList']}
+
+    def test_observed_bristol_origin_date_is_verified_with_evidence(self):
+        result = self.lookup([self.item()])
+        self.assertTrue(result['dateVerified'])
+        self.assertEqual(result['departureDate'], '2026-09-18')
+        self.assertEqual(result['dateMatchBasis'], 'scheduledOriginDeparture')
+        self.assertEqual(result['dateEvidence'][0]['path'], 'Origins.Front.DepTimestamp')
+
+    def test_overnight_service_uses_origin_date_not_station_or_forecast(self):
+        item = self.item('2026-09-17T23:50+01:00')
+        item['Origins']['Front']['ExpectedDepTimestamp'] = '2026-09-18T00:10+01:00'
+        self.assertTrue(self.lookup([item], '2026-09-17')['dateVerified'])
+        with self.assertRaises(TigerError) as error:
+            self.lookup([item], '2026-09-18')
+        self.assertEqual(error.exception.status, 404)
+
+    def test_utc_origin_is_converted_to_british_calendar_date(self):
+        self.assertTrue(self.lookup([self.item('2026-09-17T23:50Z')])['dateVerified'])
+
+    def test_forecasts_and_message_timestamps_cannot_verify_date(self):
+        item = self.item()
+        item['Origins']['Front'] = {'ExpectedDepTimestamp': '2026-09-18T09:50+01:00'}
+        item['SentTimestamp'] = '2026-09-18T10:55:36.405Z'
+        self.assertFalse(self.lookup([item])['dateVerified'])
+        del item['Origins']
+        self.assertFalse(self.lookup([item])['dateVerified'])
+
+    def test_missing_offset_malformed_and_conflicting_origins_remain_unknown(self):
+        for stamp in ['2026-09-18T09:50', '2026-09-18', '2026-99-18T09:50Z', None]:
+            self.assertFalse(self.lookup([self.item(stamp)])['dateVerified'])
+        item = self.item()
+        item['Origins']['Rear'] = {'DepTimestamp': '2026-09-17T23:50+01:00'}
+        self.assertFalse(self.lookup([item])['dateVerified'])
+        item['Origins']['Rear'] = {'DepTimestamp': '2026-09-18T09:40+01:00'}
+        self.assertTrue(self.lookup([item])['dateVerified'])
+        item['DepartureDate'] = '2026-09-17'
+        self.assertFalse(self.lookup([item])['dateVerified'])
+
+    def test_date_disambiguates_different_days_but_not_undated_duplicates(self):
+        result = self.lookup([self.item(), self.item('2026-09-17T09:50+01:00')])
+        self.assertTrue(result['dateVerified'])
+        with self.assertRaises(TigerError) as error:
+            self.lookup([self.item(), {'UID': 'G15496'}])
+        self.assertEqual(error.exception.status, 409)
+
+    def test_no_coaches_never_claims_enrichment(self):
+        item = self.item(); del item['CoachList']
+        tiger = self.lookup([item])
+        rtt = {'scheduleMetadata': {'uniqueIdentity': 'gb-nr:G15496:2026-09-18'},
+               'calls': [{'location': {'shortCodes': ['BRI'], 'longCodes': ['BRSTLTM']}}]}
+        result = reconcile_rtt_tiger(rtt, tiger, 'BRSTLTM', requested_station='BRI')
+        self.assertTrue(tiger['dateVerified'])
+        self.assertFalse(result['coachEnrichmentApplied'])
+
+    def test_wrong_envelope_station_is_rejected(self):
+        client = TigerClient('synthetic-test-secret')
+        client._opener = Mock()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"TIPLOC":"PADTLL","services":[]}'
+        client._opener.open.return_value = response
+        with self.assertRaises(TigerError):
+            client.services('PADTON')

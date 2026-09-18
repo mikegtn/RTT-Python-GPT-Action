@@ -13,7 +13,7 @@ class VerificationTests(unittest.TestCase):
         payloads = [
             {'paths': {'/v1/tiger/service': {'get': {'operationId': 'getTigerServiceDetails'}}}},
             {'result': {'services': [{'scheduleMetadata': {'uniqueIdentity': 'gb-nr:G01153:2026-09-18'}}]}},
-            {'ok': True, 'result': {'tiger': {'station': 'PADTON', 'coaches': [{}], 'totalCoaches': 5}}},
+            {'ok': True, 'result': {'tiger': {'uid': 'G01153', 'station': 'PADTON', 'coaches': [{}], 'totalCoaches': 5}}},
         ]
         opener = Mock()
         opener.open.side_effect = [io.BytesIO(json.dumps(p).encode()) for p in payloads]
@@ -43,3 +43,32 @@ class ErrorDiagnosticsTests(unittest.TestCase):
         for body in [b'secret-one', b'[]', b'{"error": {"key": "secret-one"}}']:
             error = HTTPError('https://rail.example', 400, 'Bad Request', {}, io.BytesIO(body))
             self.assertEqual(safe_api_error(error, {}), 'No structured API error was returned.')
+
+
+class MixedStationVerifierTests(unittest.TestCase):
+    def test_skips_low_level_and_reports_mainline_without_coach_data(self):
+        from urllib.error import HTTPError
+        payloads = [
+            {'paths': {'/v1/tiger/service': {'get': {'operationId': 'getTigerServiceDetails'}}}},
+            {'result': {'services': [
+                {'scheduleMetadata': {'uniqueIdentity': 'gb-nr:C38478:2026-09-18'}},
+                {'scheduleMetadata': {'uniqueIdentity': 'gb-nr:W35225:2026-09-18'}},
+            ]}},
+        ]
+        mismatch = HTTPError('https://rail.example', 400, 'Bad Request', {}, io.BytesIO(
+            b'{"error":"tiploc does not match the requested RTT station"}'))
+        success = {'ok': True, 'result': {'tiger': {'uid': 'W35225', 'station': 'PADTON',
+                   'coaches': [], 'dateVerified': True}, 'coachEnrichmentApplied': False}}
+        opener = Mock()
+        opener.open.side_effect = [io.BytesIO(json.dumps(p).encode()) for p in payloads] + [
+            mismatch, io.BytesIO(json.dumps(success).encode())]
+        with patch('sys.argv', ['verify_tiger.py', '--station', 'PAD', '--tiger-station', 'PADTON']), \
+             patch.dict('os.environ', {'ACTION_API_KEY': 'synthetic-action-key'}, clear=True), \
+             patch('deploy.verify_tiger.Path.is_file', return_value=False), \
+             patch('deploy.verify_tiger.build_opener', return_value=opener), redirect_stdout(io.StringIO()) as out:
+            main()
+        result = json.loads(out.getvalue().splitlines()[-1])
+        self.assertEqual(result['uid'], 'W35225')
+        self.assertEqual(result['skippedOtherTiploc'], 1)
+        self.assertFalse(result['coachDataAvailable'])
+        self.assertTrue(result['dateVerified'])

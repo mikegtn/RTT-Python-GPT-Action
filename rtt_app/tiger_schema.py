@@ -14,6 +14,9 @@ def tiger_operation(errors):
         'source': {'type': 'string', 'const': 'TIGER'},
         'retrievedAt': {'type': 'string', 'format': 'date-time'},
         'departureDate': nullable_label, 'dateVerified': {'type': 'boolean'},
+        'dateMatchBasis': nullable_label,
+        'dateEvidence': {'type': 'array', 'items': {'type': 'object', 'properties': {
+            'path': {'type': 'string'}, 'value': {'type': 'string'}}}},
         'totalCoaches': {'type': ['integer', 'null']},
         'orientationKnown': {'type': 'boolean'}, 'frontCoach': nullable_label, 'rearCoach': nullable_label,
         **{name: {'type': 'array', 'items': {'type': 'string'}} for name in (
@@ -37,7 +40,9 @@ def tiger_operation(errors):
             'A CRS station requires unique_identity for RTT-based resolution, or an explicit tiploc. '
             'TIGER supplies passenger facilities only; RTT remains authoritative for identity, times, '
             'platform, status, route and allocation. Missing flags mean not indicated. '
-            'Do not infer orientation from letters or class. An unverified date prevents dated enrichment. '
+            'Do not infer orientation from letters or class. Date evidence uses scheduled origin departure '
+            'timestamps in Europe/London; station and forecast timestamps do not establish service dates. '
+            'An unverified date prevents dated enrichment. '
             'Supply unique_identity to return RTT and TIGER evidence with reconciliation warnings.'),
         'parameters': [
             {'name': 'station', 'in': 'query', 'required': True,

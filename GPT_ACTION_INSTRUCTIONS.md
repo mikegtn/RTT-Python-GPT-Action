@@ -72,3 +72,10 @@ proof of absence. State front/rear only when `orientationKnown` is true. Coach
 letters and First Class position do not establish direction. If `dateVerified`
 is false, describe TIGER as unverified station-board evidence, not a confirmed
 formation for the dated service. Preserve this distinction around midnight.
+
+TIGER date matching uses scheduled origin `DepTimestamp` values, converted to
+Europe/London, with evidence returned as `dateMatchBasis` and `dateEvidence`.
+Do not substitute station-call, expected, board or processing dates. Conflicting
+origin dates remain unverified. Paddington CRS PAD covers PADTON and PADTLL;
+resolve the TIPLOC from the particular RTT service rather than assuming one.
+A successful lookup without CoachList means coach facilities are not indicated.

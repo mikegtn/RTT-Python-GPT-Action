@@ -37,6 +37,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--station', default='PAD', help='RTT station name or CRS code')
     parser.add_argument('--tiger-station', help='Explicit TIGER TIPLOC, e.g. PADTON; otherwise resolve from RTT calls')
+    parser.add_argument('--require-coaches', action='store_true', help='Fail unless a matching service supplies CoachList')
     parser.add_argument('--env-file', type=Path, default=Path('/etc/rtt-action.env'))
     args = parser.parse_args()
     config = dict(os.environ)
@@ -70,6 +71,17 @@ def main():
     board = get('/v1/services', {'station': args.station, 'minutes': 180, 'count': 40})
     candidates = board.get('result', {}).get('services', [])
     attempted = 0
+    without_coaches = None
+    skipped_other_tiploc = 0
+    def report(identity_match, tiger, reconciled):
+        print(json.dumps({'uid': identity_match[1], 'rttStation': args.station,
+              'tigerStation': tiger.get('station'), 'totalCoaches': tiger.get('totalCoaches'),
+              'coachDataAvailable': bool(tiger.get('coaches')),
+              'orientationKnown': tiger.get('orientationKnown'),
+              'dateVerified': tiger.get('dateVerified'), 'dateMatchBasis': tiger.get('dateMatchBasis'),
+              'coachEnrichmentApplied': reconciled.get('coachEnrichmentApplied'),
+              'conflicts': reconciled.get('conflicts', []),
+              'skippedOtherTiploc': skipped_other_tiploc}))
     for candidate in candidates:
         identity = (candidate.get('scheduleMetadata') or {}).get('uniqueIdentity', '')
         match = re.fullmatch(r'(?:gb-nr:)?([A-Z][0-9]{5}):(\d{4}-\d{2}-\d{2})', identity)
@@ -83,20 +95,27 @@ def main():
         except HTTPError as error:
             code = error.code
             error.close()
-            if code == 404 and attempted < 10:
+            if code == 400 and args.tiger_station and error.safe_detail == 'tiploc does not match the requested RTT station':
+                skipped_other_tiploc += 1
+                attempted -= 1
+                continue
+            if code == 404:
+                if attempted >= 10:
+                    break
                 continue
             sys.exit(f'TIGER verification failed: HTTP {code}: {error.safe_detail}')
         reconciled = result.get('result', {})
         tiger = reconciled.get('tiger', {})
-        if result.get('ok') and tiger.get('coaches'):
-            print(json.dumps({'uid': match[1], 'rttStation': args.station, 'tigerStation': tiger.get('station'),
-                  'totalCoaches': tiger.get('totalCoaches'),
-                  'orientationKnown': tiger.get('orientationKnown'),
-                  'dateVerified': tiger.get('dateVerified'),
-                  'coachEnrichmentApplied': reconciled.get('coachEnrichmentApplied')}))
-            return
+        if result.get('ok') and tiger.get('uid') == match[1]:
+            if tiger.get('coaches'):
+                report(match, tiger, reconciled)
+                return
+            without_coaches = (match, tiger, reconciled)
         if attempted >= 10:
             break
+    if without_coaches and not args.require_coaches:
+        report(*without_coaches)
+        return
     sys.exit('No live RTT candidate with TIGER coach data found (at most ten checked).')
 
 

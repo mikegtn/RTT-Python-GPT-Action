@@ -6,6 +6,7 @@ import math
 import re
 from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -134,6 +135,52 @@ def normalize_coach_list(raw: Any) -> dict[str, Any]:
     }
 
 
+
+def service_date_evidence(service: dict[str, Any]) -> dict[str, Any]:
+    """Use scheduled origin dates, never station, forecast or message dates.
+
+    Different origin dates on joined portions cannot establish one service date.
+    Missing/malformed origin evidence also stays unverified.
+    """
+    evidence = []
+    dates = set()
+    invalid = False
+    explicit = service.get('DepartureDate')
+    if explicit not in (None, ''):
+        try:
+            if not isinstance(explicit, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', explicit):
+                raise ValueError
+            dates.add(date.fromisoformat(explicit).isoformat())
+            evidence.append({'path': 'DepartureDate', 'value': explicit})
+        except ValueError:
+            invalid = True
+    origins = service.get('Origins')
+    if origins is not None:
+        if not isinstance(origins, dict):
+            invalid = True
+        else:
+            for portion, origin in origins.items():
+                if origin in (None, {}, ''):
+                    continue
+                stamp = origin.get('DepTimestamp') if isinstance(origin, dict) else None
+                try:
+                    if not isinstance(stamp, str) or not re.match(r'^\d{4}-\d{2}-\d{2}T', stamp):
+                        raise ValueError
+                    parsed = datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+                    if parsed.utcoffset() is None:
+                        raise ValueError
+                    dates.add(parsed.astimezone(ZoneInfo('Europe/London')).date().isoformat())
+                    evidence.append({'path': f'Origins.{portion}.DepTimestamp', 'value': stamp})
+                except ValueError:
+                    invalid = True
+    resolved = next(iter(dates)) if len(dates) == 1 and not invalid else None
+    return {'departureDate': resolved,
+            'dateMatchBasis': ('scheduledOriginDeparture' if any(e['path'].startswith('Origins.') for e in evidence)
+                               else 'explicitDepartureDate') if resolved else None,
+            'dateEvidence': evidence,
+            'warnings': ['Origin date evidence is missing, malformed or conflicting.'] if invalid or len(dates) > 1 else []}
+
+
 class TigerClient:
     def __init__(self, api_key: str, *, base_url: str = DEFAULT_BASE_URL, timeout: float = 15):
         if not api_key.strip():
@@ -177,6 +224,8 @@ class TigerClient:
                 raise TigerError('TIGER location not found; check the station TIPLOC', 404)
             if 'name' in payload and 'detail' in payload:
                 raise TigerError('TIGER returned an application error')
+            if payload.get('TIPLOC') not in (None, station):
+                raise TigerError('TIGER returned a different station TIPLOC')
             payload = payload.get('Services', payload.get('services'))
         if not isinstance(payload, list) or any(not isinstance(s, dict) for s in payload):
             raise TigerError('TIGER returned an unsupported services payload')
@@ -184,22 +233,26 @@ class TigerClient:
 
     def get_service_details(self, station: str, uid: str, departure_date: str | None = None) -> dict[str, Any]:
         station = validate_lookup(station, uid, departure_date)
-        matches = [s for s in self.services(station) if s.get('UID') == uid]
+        matches = [(s, service_date_evidence(s)) for s in self.services(station) if s.get('UID') == uid]
         # Only an explicit service date can verify a dated match. Never infer it
         # from the current day, a headcode, departure time or UID substring.
         if departure_date:
-            matches = [s for s in matches if s.get('DepartureDate') in (None, departure_date)]
+            matches = [(s, evidence) for s, evidence in matches
+                       if evidence['departureDate'] in (None, departure_date)]
         if not matches:
             raise TigerError('No exact TIGER UID match at this station', 404)
         if len(matches) != 1:
             raise TigerError('Ambiguous TIGER UID match at this station', 409)
-        service = matches[0]
+        service, date_info = matches[0]
         result = normalize_coach_list(service.get('CoachList'))
         result.update({'uid': uid, 'station': station, 'source': 'TIGER',
                        'retrievedAt': datetime.now(timezone.utc).isoformat(),
-                       'departureDate': service.get('DepartureDate'),
-                       'dateVerified': bool(departure_date and service.get('DepartureDate') == departure_date),
+                       'departureDate': date_info['departureDate'],
+                       'dateMatchBasis': date_info['dateMatchBasis'],
+                       'dateEvidence': date_info['dateEvidence'],
+                       'dateVerified': bool(departure_date and date_info['departureDate'] == departure_date),
                        'rawService': service})
+        result['warnings'].extend(date_info['warnings'])
         if not result['dateVerified']:
             result['warnings'].append('Service date is unverified; do not attach this evidence to a dated RTT service.')
         return result
@@ -230,9 +283,10 @@ def reconcile_rtt_tiger(rtt: dict[str, Any], tiger: dict[str, Any], station: str
             count = allocations[0].get('passengerVehicles')
             if count is not None and tiger['totalCoaches'] is not None and count != tiger['totalCoaches']:
                 conflicts.append({'field': 'totalCoaches', 'rtt': count, 'tiger': tiger['totalCoaches']})
-    return {'rtt': rtt, 'tiger': tiger, 'coachEnrichmentApplied': bool(matched and not conflicts),
+    return {'rtt': rtt, 'tiger': tiger, 'coachEnrichmentApplied': bool(matched and not conflicts and tiger.get('coaches')),
             'conflicts': conflicts,
             'warnings': ([] if matched else ['RTT/TIGER dated identity and station match not verified.']) +
-                        (['Coach counts disagree; report both sources.'] if conflicts else []),
+                        (['Coach counts disagree; report both sources.'] if conflicts else []) +
+                        (['TIGER coach data is not indicated for this service.'] if not tiger.get('coaches') else []),
             'authority': {'identity': 'RTT', 'times': 'RTT', 'platform': 'RTT',
                           'status': 'RTT', 'route': 'RTT', 'allocation': 'RTT', 'coachFacilities': 'TIGER'}}

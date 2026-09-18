@@ -208,10 +208,20 @@ No match returns 404, duplicate matches 409, and upstream failures or malformed
 payloads 502. TIGER HTTP-200 `{name: "NotFound", detail: ...}` responses are
 translated to a safe 404; other application errors return 502 without echoing
 upstream detail. It accepts a service array or `Services`/`services` wrapper.
-These envelope adapters and the optional `DepartureDate` field still need
-validation against an authenticated live response; no date is invented when
-that field is absent. Tests use synthetic fixtures derived from the agreed
-CoachList example, not a captured live response.
+The supplied live diagnostics confirm the `services` wrapper with station
+`TIPLOC` and board `timestamp`. The returned TIPLOC is checked when present.
+Scheduled `Origins.<portion>.DepTimestamp` values establish the origin departure
+date in Europe/London. `dateMatchBasis` and `dateEvidence` explain this decision.
+Station call dates, expected times, board timestamps and message processing
+stamps never establish a service date. Missing/invalid offsets or disagreeing
+origin dates leave it unverified; an explicit `DepartureDate`, if supplied,
+must agree. This preserves the origin date for overnight services. Tests use
+selected date fields from the supplied diagnostics plus synthetic coach data.
+
+RTT CRS `PAD` includes both `PADTON` and `PADTLL` calls. Mapping remains specific
+to each selected service; the API correctly rejects a conflicting explicit
+TIPLOC. The verifier skips that particular mapping conflict when an explicit
+`--tiger-station` filters a combined CRS board, then checks the other candidates.
 
 Coach normalization preserves `rawService` and `rawCoachList`, sorts unique
 positive `CoachNumber` values, and uses consistent `LeadingPowerCar` or
@@ -245,10 +255,13 @@ sudo python3 deploy/verify_tiger.py --station PAD --tiger-station PADTON
 The verification command checks the published OpenAPI operation, discovers an
 exact live RTT UID at the station, then requests TIGER evidence. It reads the
 Action key from the environment file into memory and prints only safe summary
-fields. It never prints either key or upstream error bodies. It exits nonzero
-if no candidate has coach data; try a station served by an operator publishing
-formations. A successful response with `dateVerified=false` verifies the
-transport and coach extraction only, not a dated RTT reconciliation.
+fields and redacted API error messages. It never prints either key or raw
+upstream error bodies. It prefers services with coach data, but a matched service
+without CoachList is a valid lookup (`coachDataAvailable=false`). Use
+`--require-coaches` when verifying formation extraction; this exits nonzero if
+no checked candidate has coaches. A response with `dateVerified=false` verifies
+the lookup only, not dated reconciliation. `coachEnrichmentApplied` is always
+false for missing CoachList, even when the dated identity matches.
 
 For the existing `/opt/rtt-action` deployment, `deploy/update_tiger.sh COMMIT_SHA`
 stages a pinned release, runs its tests, backs up the existing installation,
