@@ -15,6 +15,24 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+
+def safe_api_error(error, config):
+    """Expose only the API error field, with configured secrets removed."""
+    try:
+        payload = json.loads(error.read(65537))
+        detail = payload.get('error') if isinstance(payload, dict) else None
+        if not isinstance(detail, str):
+            return 'No structured API error was returned.'
+        for name, value in config.items():
+            if any(word in name.upper() for word in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD')) and value:
+                detail = detail.replace(value, '[REDACTED]')
+        return ''.join(c if c.isprintable() else ' ' for c in detail)[:500]
+    except (ValueError, OSError):
+        return 'No structured API error was returned.'
+    finally:
+        error.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--station', default='PAD', help='RTT station name or CRS code')
@@ -38,8 +56,12 @@ def main():
         headers = {'Accept': 'application/json'}
         if authenticated:
             headers['Authorization'] = 'Bearer ' + key
-        with opener.open(Request(url, headers=headers), timeout=25) as response:
-            return json.load(response)
+        try:
+            with opener.open(Request(url, headers=headers), timeout=25) as response:
+                return json.load(response)
+        except HTTPError as error:
+            error.safe_detail = safe_api_error(error, config)
+            raise
     schema = get('/openapi.json', authenticated=False)
     operation = schema.get('paths', {}).get('/v1/tiger/service', {}).get('get', {})
     if operation.get('operationId') != 'getTigerServiceDetails':
@@ -63,7 +85,7 @@ def main():
             error.close()
             if code == 404 and attempted < 10:
                 continue
-            sys.exit(f'TIGER verification failed: HTTP {code}')
+            sys.exit(f'TIGER verification failed: HTTP {code}: {error.safe_detail}')
         reconciled = result.get('result', {})
         tiger = reconciled.get('tiger', {})
         if result.get('ok') and tiger.get('coaches'):
@@ -84,6 +106,6 @@ if __name__ == '__main__':
     except HTTPError as error:
         code = error.code
         error.close()
-        sys.exit(f'Verification failed: HTTP {code}')
+        sys.exit(f'Verification failed: HTTP {code}: {getattr(error, "safe_detail", "No diagnostic available")}')
     except (URLError, OSError, ValueError, TypeError):
         sys.exit('Verification failed: unavailable service or invalid response; credentials suppressed.')

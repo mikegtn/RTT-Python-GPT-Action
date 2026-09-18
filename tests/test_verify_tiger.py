@@ -5,7 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
-from deploy.verify_tiger import main
+from deploy.verify_tiger import main, safe_api_error
 
 
 class VerificationTests(unittest.TestCase):
@@ -28,3 +28,18 @@ class VerificationTests(unittest.TestCase):
         self.assertIn('tiploc=PADTON', urls[2])
         self.assertNotIn('synthetic-action-key', out.getvalue())
         self.assertIn('"tigerStation": "PADTON"', out.getvalue())
+
+
+class ErrorDiagnosticsTests(unittest.TestCase):
+    def test_api_error_is_reported_without_credentials(self):
+        from urllib.error import HTTPError
+        body = json.dumps({'error': 'Invalid mapping; key=secret-one token=secret-two'}).encode()
+        error = HTTPError('https://rail.example', 400, 'Bad Request', {}, io.BytesIO(body))
+        detail = safe_api_error(error, {'TIGER_API_KEY': 'secret-one', 'RTT_TOKEN': 'secret-two'})
+        self.assertEqual(detail, 'Invalid mapping; key=[REDACTED] token=[REDACTED]')
+
+    def test_unstructured_response_is_never_printed(self):
+        from urllib.error import HTTPError
+        for body in [b'secret-one', b'[]', b'{"error": {"key": "secret-one"}}']:
+            error = HTTPError('https://rail.example', 400, 'Bad Request', {}, io.BytesIO(body))
+            self.assertEqual(safe_api_error(error, {}), 'No structured API error was returned.')
