@@ -143,6 +143,11 @@ class JourneyRouteTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 renderer.assert_not_called()
                 result = response.body["result"]
+                self.assertNotIn("coordinates", result)
+                map_id = result["mapUrl"].rsplit("/", 1)[-1]
+                map_response = app.dispatch("GET", "/maps/" + map_id, {}, {})
+                self.assertIn("55", map_response.body)
+                self.assertEqual(next(iter(response.body)), "requestEvidence")
                 self.assertNotIn("mapImageUrl", result)
                 self.assertIn(result["mapUrl"], result["interactiveMapMarkdown"])
                 self.assertEqual(response.body["requestEvidence"]["operation"], "getJourneyRoute")

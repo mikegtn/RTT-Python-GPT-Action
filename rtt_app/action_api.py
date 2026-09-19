@@ -519,10 +519,12 @@ class ActionApplication:
     ) -> ActionResponse:
         response = self._dispatch(method, path, params, headers)
         if path in OPERATIONS and isinstance(response.body, dict):
-            response.body["requestEvidence"] = {
+            evidence = {
                 "requestId": secrets.token_hex(12), "operation": OPERATIONS[path],
                 "completedAt": datetime.now(timezone.utc).isoformat(),
             }
+            response = ActionResponse(response.status, {"requestEvidence": evidence, **response.body},
+                                      response.content_type)
         return response
 
     def _dispatch(
@@ -612,6 +614,14 @@ class ActionApplication:
                     result = build_journey_route(self.tools, self.route_engine,
                                                  _one(params, "legs") or _required("legs"))
                     result["mapUrl"] = self._save_route_map(result)
+                    # The browser map needs geometry; the model needs the evidence
+                    # and URL. Avoid flooding its retained tool context with vertices.
+                    result["schedulePointCount"] = len(result.get("requested_route_guidance", []))
+                    result = {key: value for key, value in result.items() if key in {
+                        "origin", "destination", "mileage", "routeBasis", "legs",
+                        "minimumConnectionTimesVerified", "routing_warnings", "mapUrl",
+                        "schedulePointCount", "attribution",
+                    }}
                 elif path == "/v1/route":
                     if self.route_engine is None:
                         return ActionResponse(503, {"ok": False, "error": "Route engine unavailable"})
