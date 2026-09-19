@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY rtt_app ./rtt_app
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir '.[snapshots]'
 
 EXPOSE 8765
 CMD ["python", "-m", "rtt_app.action_api", "--host", "0.0.0.0"]

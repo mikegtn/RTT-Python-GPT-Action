@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 from .cli import load_dotenv
 from .client import RTTClient, RTTError
 from .movebook_route import MovebookRouteEngine, MovebookRouteError
+from .map_snapshot import SnapshotError, render as render_snapshot
 from .rail_assistant import RTTRailTools
 from .tiger import TigerClient, TigerError, reconcile_rtt_tiger, validate_lookup, resolve_tiger_tiploc
 from .tiger_schema import tiger_operation
@@ -301,6 +302,12 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                     ),
                     "parameters": [
                         {
+                            "name": "include_snapshot",
+                            "in": "query",
+                            "description": "Set true only when the user requests a static map image. Returns mapImageUrl for Markdown embedding, fitted to the entire route.",
+                            "schema": {"type": "boolean", "default": False},
+                        },
+                        {
                             "name": "origin",
                             "in": "query",
                             "required": True,
@@ -324,6 +331,17 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                             "schema": {"type": "string"},
                         },
                     ],
+                    "responses": {"200": json_response, **error_responses},
+                }
+            },
+            "/v1/map-snapshot": {
+                "get": {
+                    "operationId": "getRailMapSnapshot",
+                    "summary": "Create a static image of an existing route map",
+                    "description": "On user request, render a saved route as a whole-route PNG. Use the id from the returned mapUrl. Embed returned mapImageUrl as a Markdown image and keep mapUrl as an interactive link.",
+                    "parameters": [{"name": "map_id", "in": "query", "required": True,
+                                    "description": "The 24-character id at the end of a returned mapUrl.",
+                                    "schema": {"type": "string", "pattern": "^[a-f0-9]{24}$"}}],
                     "responses": {"200": json_response, **error_responses},
                 }
             },
@@ -397,7 +415,7 @@ class ActionApplication:
         if not path.startswith("/v1/"):
             return
         known_paths = {
-            "/v1/departures", "/v1/services", "/v1/service", "/v1/info", "/v1/usage", "/v1/route", "/v1/tiger/service"
+            "/v1/departures", "/v1/services", "/v1/service", "/v1/info", "/v1/usage", "/v1/route", "/v1/map-snapshot", "/v1/tiger/service"
         }
         path = path if path in known_paths else "/v1/other"
         with self._lock:
@@ -432,14 +450,39 @@ class ActionApplication:
         return f"{self.base_url}/maps/{map_id}"
 
     def _route_map(self, map_id: str) -> ActionResponse:
+        is_image = map_id.endswith(".png")
+        if is_image:
+            map_id = map_id[:-4]
         if self._map_dir is None or not MAP_ID_RE.fullmatch(map_id):
             return ActionResponse(404, {"ok": False, "error": "Map not found"})
+        if is_image:
+            try:
+                return ActionResponse(200, (self._map_dir / f"{map_id}.png").read_bytes(), "image/png")
+            except OSError:
+                return ActionResponse(404, {"ok": False, "error": "Map image not found"})
         source = self._map_dir / f"{map_id}.json"
         try:
             route = json.loads(source.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return ActionResponse(404, {"ok": False, "error": "Map not found"})
         return ActionResponse(200, _render_route_map(route), "text/html; charset=utf-8")
+
+    def _snapshot(self, map_id: str) -> ActionResponse:
+        if self._map_dir is None or not MAP_ID_RE.fullmatch(map_id):
+            return ActionResponse(404, {"ok": False, "error": "Map not found"})
+        try:
+            route = json.loads((self._map_dir / f"{map_id}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ActionResponse(404, {"ok": False, "error": "Map not found"})
+        try:
+            render_snapshot(route, self._map_dir / f"{map_id}.png")
+        except SnapshotError as exc:
+            return ActionResponse(503, {"ok": False, "error": str(exc)})
+        return ActionResponse(200, {"ok": True, "result": {
+            "mapUrl": f"{self.base_url}/maps/{map_id}",
+            "mapImageUrl": f"{self.base_url}/maps/{map_id}.png",
+            "imageAlt": f"Railway route from {route.get('origin', 'origin')} to {route.get('destination', 'destination')}",
+        }})
 
     def _authorized(self, headers: Mapping[str, str]) -> bool:
         authorization = headers.get("Authorization", "")
@@ -479,6 +522,9 @@ class ActionApplication:
         if not self._authorized(headers):
             return ActionResponse(401, {"ok": False, "error": "Unauthorized"})
         try:
+            if path == "/v1/map-snapshot":
+                return self._snapshot(_one(params, "map_id") or _required("map_id"))
+            include_snapshot = _boolean(params, "include_snapshot") if path == "/v1/route" else False
             with self._lock:
                 if path == "/v1/departures":
                     result = self.tools.next_departures(
@@ -559,6 +605,15 @@ class ActionApplication:
                     result["mapUrl"] = self._save_route_map(result)
                 else:
                     return ActionResponse(404, {"ok": False, "error": "Not found"})
+            if include_snapshot:
+                if result.get("mapUrl"):
+                    snapshot = self._snapshot(result["mapUrl"].rsplit("/", 1)[-1])
+                    if snapshot.status == 200:
+                        result.update(snapshot.body["result"])
+                    else:
+                        result["snapshotError"] = snapshot.body["error"]
+                else:
+                    result["snapshotError"] = "Map snapshots are not configured on this server"
             body = {"ok": True, "result": result}
             if len(json.dumps(body, ensure_ascii=False).encode("utf-8")) > MAX_RESPONSE_BYTES:
                 return ActionResponse(502, {"ok": False, "error": "RTT response was too large"})
@@ -605,14 +660,16 @@ def make_handler(application: ActionApplication) -> type[BaseHTTPRequestHandler]
                 "GET", parsed.path.rstrip("/") or "/", parse_qs(parsed.query), self.headers
             )
             application.record_request(parsed.path.rstrip("/") or "/", response.status)
-            if isinstance(response.body, str):
+            if isinstance(response.body, bytes):
+                payload = response.body
+            elif isinstance(response.body, str):
                 payload = response.body.encode("utf-8")
             else:
                 payload = json.dumps(response.body, ensure_ascii=False).encode("utf-8")
             self.send_response(response.status)
             self.send_header("Content-Type", response.content_type)
             self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", "public, max-age=604800, immutable" if response.content_type == "image/png" else "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(payload)

@@ -12,6 +12,9 @@ license = { text = "MIT" }
 authors = [{ name = "RTT API explorer" }]
 dependencies = []
 
+[project.optional-dependencies]
+snapshots = ["Pillow>=10.4,<13"]
+
 [project.scripts]
 rtt = "rtt_app.cli:main"
 rtt-gui = "rtt_app.gui:main"

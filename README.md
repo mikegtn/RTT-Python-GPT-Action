@@ -118,6 +118,27 @@ It also serves unauthenticated `/health`, `/openapi.json`, `/privacy`, and gener
 `/maps/{id}` route-map pages. Set `MOVEBOOK_ROUTE_SCRIPT` to the Movebook
 `scripts/route_movebook_draft.py` path and `ACTION_MAP_DIR` to a writable map cache.
 
+### Static route snapshots
+
+For a requested inline map image, call `/v1/route?origin=...&destination=...&include_snapshot=true`.
+For an existing map, call authenticated `/v1/map-snapshot?map_id=...` using the
+24-character id from `mapUrl`. The response includes `mapImageUrl` and `imageAlt`.
+The GPT instructions embed that URL as a Markdown image with an interactive map
+link beneath it; actual inline rendering depends on the ChatGPT client.
+Re-import `/openapi.json` and update `GPT_ACTION_INSTRUCTIONS.md` in the GPT editor
+when enabling this feature.
+
+Install `pip install '.[snapshots]'` (or Ubuntu's `python3-pil` package for the
+system Python deployment). Normal API calls and HTML maps need no Pillow.
+Snapshots are 1200×800 PNGs, fitted to all route vertices and points, with a
+separate title and OpenStreetMap attribution area. Only authenticated requests
+generate images. Public `/maps/{id}.png` serves completed images only; it never
+starts rendering. Images and a shared seven-day tile cache live in `ACTION_MAP_DIR`.
+Only the requested viewport is fetched, using an identified User-Agent and four
+bounded workers. Failed tile loads do not publish partial images. Existing PNGs
+are reused. When rendering fails, route results retain the interactive map and
+include `snapshotError`; the separate snapshot endpoint returns 503.
+
 Installing the local `rtt` command is optional:
 
 ```powershell
