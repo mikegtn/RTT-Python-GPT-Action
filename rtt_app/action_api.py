@@ -578,6 +578,7 @@ def _render_route_map(route: Mapping[str, Any]) -> str:
     route_json = json.dumps(route, ensure_ascii=False).replace("<", "\\u003c")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://unpkg.com; script-src 'unsafe-inline' https://unpkg.com; img-src data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org">
 <title>{html.escape(title)}</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>html,body,#map{{height:100%;margin:0}} .summary{{position:absolute;z-index:1000;left:56px;right:12px;top:12px;max-width:640px;background:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 2px 12px #0004;font:15px system-ui}} .summary strong{{display:block}}</style></head>
