@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import secrets
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .action_api import build_openapi_schema
 
@@ -85,11 +86,18 @@ def tool_catalog():
     return catalog
 
 
-def timestamp(value):
+def timestamp(value, *, require_offset=False):
     result = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if result.tzinfo is None:
-        raise ValueError("Times must include a UTC offset")
-    return result
+        if require_offset:
+            raise ValueError("Query times must include a UTC offset")
+        # RTT gb-nr timing fields are UK local wall-clock values. Preserve the
+        # original strings in responses; normalize only for comparisons.
+        local = result.replace(tzinfo=ZoneInfo("Europe/London"))
+        if local.utcoffset() != local.replace(fold=1).utcoffset():
+            raise ValueError("An RTT time is ambiguous or nonexistent at the UK clock change")
+        result = local
+    return result.astimezone(timezone.utc)
 
 
 def matches(call, station):
@@ -199,7 +207,7 @@ class RailWorkflows:
 
     async def find_journeys(self, request, origin, destination, time_from, minutes=720,
                             interchanges=None, connection_minutes=15):
-        start = timestamp(time_from)
+        start = timestamp(time_from, require_offset=True)
         end = start + timedelta(minutes=minutes)
         interchanges = interchanges or []
         cache, coverage, options = {}, [], []

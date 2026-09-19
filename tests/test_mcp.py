@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import unittest
 
-from rtt_app.mcp_tools import RailWorkflows, passenger_leg, tool_catalog
+from rtt_app.mcp_tools import RailWorkflows, passenger_leg, timestamp, tool_catalog
 
 
 def service(identity="opaque-rtt-identity", origin="ABD", destination="PLY", departure="08:00", arrival="18:00"):
@@ -20,6 +20,15 @@ def service(identity="opaque-rtt-identity", origin="ABD", destination="PLY", dep
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
+    def test_rtt_local_times_and_clock_changes(self):
+        self.assertEqual(timestamp("2026-09-19T05:57:00"), timestamp("2026-09-19T05:57:00+01:00"))
+        with self.assertRaises(ValueError):
+            timestamp("2026-10-25T01:30:00")
+        with self.assertRaises(ValueError):
+            timestamp("2026-03-29T01:30:00")
+        with self.assertRaises(ValueError):
+            timestamp("2026-09-19T05:57:00", require_offset=True)
+
     def test_cancelled_and_restricted_trains_are_excluded(self):
         for mutation in [
             lambda s: s["calls"][0]["temporalData"]["departure"].update(isCancelled=True),
