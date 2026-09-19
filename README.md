@@ -124,7 +124,9 @@ For a requested inline map image, call `/v1/route?origin=...&destination=...&inc
 For an existing map, call authenticated `/v1/map-snapshot?map_id=...` using the
 24-character id from `mapUrl`. The response includes `mapImageUrl` and `imageAlt`.
 The GPT instructions embed that URL as a Markdown image with an interactive map
-link beneath it; actual inline rendering depends on the ChatGPT client.
+link and a direct `View snapshot` link beneath it. In the September 2026 web-client
+check, the GPT produced correct image Markdown but ChatGPT suppressed the image;
+the direct image link remains usable. Actual inline rendering depends on the client.
 Re-import `/openapi.json` and update `GPT_ACTION_INSTRUCTIONS.md` in the GPT editor
 when enabling this feature.
 

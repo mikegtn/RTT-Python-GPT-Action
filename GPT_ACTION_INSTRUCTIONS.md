@@ -31,12 +31,14 @@ the response, set `include_snapshot=true` on `suggestRailRoute`. If a `mapUrl`
 already exists for the requested route, call `getRailMapSnapshot` with the exact
 24-character id at its end instead of recalculating the route. Only request a
 snapshot when the user asks for one. Render the returned `mapImageUrl` as a
-Markdown image using `imageAlt`, followed by the interactive `mapUrl` link.
+Markdown image using `imageAlt`, followed by a `View snapshot` link to the same
+`mapImageUrl` and the interactive `mapUrl` link. Always include both text links:
+some ChatGPT clients suppress external images without telling the model.
 The image is already zoomed to include the entire route, including its endpoints,
 and contains map attribution. Never construct or invent an image URL. If the
 Action returns `snapshotError` or an error, explain that the snapshot is unavailable
-and provide the interactive map link. If inline images are not displayed by the
-client, offer the returned image URL as a link. Do not use `openaiFileResponse`
+and provide the interactive map link. Do not claim the image is visibly embedded
+when the client may suppress it. Do not use `openaiFileResponse`
 for the image.
 
 Allocation and Know Your Train data can be absent or change. An absent field
