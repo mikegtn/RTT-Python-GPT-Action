@@ -113,6 +113,25 @@ The bridge exposes only these authenticated, read-only routes:
 - `GET /v1/info`
 - `GET /v1/usage` — aggregate request counts by endpoint and response status
 - `GET /v1/route` — topology-backed Movebook railway route, mileage, alternatives and map link
+- `GET /v1/journey-route` — itinerary map constrained by dated RTT services
+
+For a selected train or connecting itinerary, use `getJourneyRoute` rather than a
+generic shortest route. Its `legs` query parameter is a JSON array of 1–6 objects
+with `unique_identity` (exact RTT identity), `origin` and `destination` (station
+names or CRS codes), in travel order. The server validates the dated identities,
+advertised pickup/set-down calls, station continuity and scheduled chronology,
+then routes through RTT passenger calls and technical passing points. Repeated
+points are retained for reversals. Missing topology points produce warnings;
+unmapped passenger calls fail instead of yielding a misleading map. Geometry
+between known schedule points remains inferred. Minimum interchange times and
+passenger transfers are not verified. Cancelled movements are explicitly warned.
+
+All Action responses include `requestEvidence` with a request ID, operation and
+completion timestamp. The HTTP server writes the same fields and status to its
+journal, without query text, credentials or client addresses. This enables an
+independent check of GPT-reported calls. The map response supplies distinct
+`interactiveMapMarkdown` and (only on explicit request) `snapshotMarkdown` links.
+Re-import the schema and publish the updated instructions in the GPT editor.
 
 It also serves unauthenticated `/health`, `/openapi.json`, `/privacy`, and generated
 `/maps/{id}` route-map pages. Set `MOVEBOOK_ROUTE_SCRIPT` to the Movebook

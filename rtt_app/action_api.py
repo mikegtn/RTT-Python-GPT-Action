@@ -22,6 +22,7 @@ from .client import RTTClient, RTTError
 from .movebook_route import MovebookRouteEngine, MovebookRouteError
 from .map_snapshot import SnapshotError, render as render_snapshot
 from .rail_assistant import RTTRailTools
+from .journey_route import build_journey_route
 from .tiger import TigerClient, TigerError, reconcile_rtt_tiger, validate_lookup, resolve_tiger_tiploc
 from .tiger_schema import tiger_operation
 from .tiger_icons import ICONS, add_coach_icons
@@ -29,6 +30,13 @@ from .tiger_icons import ICONS, add_coach_icons
 
 MAX_RESPONSE_BYTES = 950_000
 MAP_ID_RE = re.compile(r"^[a-f0-9]{24}$")
+OPERATIONS = {
+    "/v1/departures": "getNextDepartures", "/v1/services": "searchStationServices",
+    "/v1/service": "getServiceDetails", "/v1/info": "getRttApiInfo",
+    "/v1/usage": "getApiUsage", "/v1/route": "suggestRailRoute",
+    "/v1/journey-route": "getJourneyRoute", "/v1/map-snapshot": "getRailMapSnapshot",
+    "/v1/tiger/service": "getTigerServiceDetails",
+}
 
 
 def _one(params: Mapping[str, list[str]], name: str, default: str | None = None) -> str | None:
@@ -163,7 +171,7 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                 "Read live and scheduled UK rail services, allocations and Know Your Train "
                 "coach data from the Realtime Trains API. Data can be absent or change."
             ),
-            "version": "1.2.0",
+            "version": "1.3.0",
         },
         "servers": [{"url": server}],
         "security": [{"bearerAuth": []}],
@@ -334,6 +342,22 @@ def build_openapi_schema(base_url: str) -> dict[str, Any]:
                     "responses": {"200": json_response, **error_responses},
                 }
             },
+            "/v1/journey-route": {
+                "get": {
+                    "operationId": "getJourneyRoute",
+                    "summary": "Map a dated itinerary from verified RTT services",
+                    "description": "Use for maps of actual trains or connecting journeys. Fetches each exact RTT service and follows its calls and passing points in order. Returns mapUrl, leg evidence and warnings. Geometry between schedule points is inferred; minimum connection times are not verified.",
+                    "parameters": [
+                        {"name": "legs", "in": "query", "required": True,
+                         "description": 'JSON array of 1-6 ordered legs, each with unique_identity (exact RTT uniqueIdentity), origin and destination (station name or CRS). Example: [{"unique_identity":"gb-nr:G01162:2026-09-19","origin":"NCL","destination":"PLY"}]. Never invent identities.',
+                         "schema": {"type": "string", "maxLength": 8000}},
+                        {"name": "include_snapshot", "in": "query",
+                         "description": "Default false. True only for an explicit request for a static snapshot or embedded image; a route map request alone means an interactive link.",
+                         "schema": {"type": "boolean", "default": False}},
+                    ],
+                    "responses": {"200": json_response, **error_responses},
+                }
+            },
             "/v1/map-snapshot": {
                 "get": {
                     "operationId": "getRailMapSnapshot",
@@ -415,7 +439,7 @@ class ActionApplication:
         if not path.startswith("/v1/"):
             return
         known_paths = {
-            "/v1/departures", "/v1/services", "/v1/service", "/v1/info", "/v1/usage", "/v1/route", "/v1/map-snapshot", "/v1/tiger/service"
+            *OPERATIONS
         }
         path = path if path in known_paths else "/v1/other"
         with self._lock:
@@ -493,6 +517,17 @@ class ActionApplication:
     def dispatch(
         self, method: str, path: str, params: Mapping[str, list[str]], headers: Mapping[str, str]
     ) -> ActionResponse:
+        response = self._dispatch(method, path, params, headers)
+        if path in OPERATIONS and isinstance(response.body, dict):
+            response.body["requestEvidence"] = {
+                "requestId": secrets.token_hex(12), "operation": OPERATIONS[path],
+                "completedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        return response
+
+    def _dispatch(
+        self, method: str, path: str, params: Mapping[str, list[str]], headers: Mapping[str, str]
+    ) -> ActionResponse:
         if method != "GET":
             return ActionResponse(405, {"ok": False, "error": "Method not allowed"})
         if path == "/health":
@@ -524,7 +559,7 @@ class ActionApplication:
         try:
             if path == "/v1/map-snapshot":
                 return self._snapshot(_one(params, "map_id") or _required("map_id"))
-            include_snapshot = _boolean(params, "include_snapshot") if path == "/v1/route" else False
+            include_snapshot = _boolean(params, "include_snapshot") if path in {"/v1/route", "/v1/journey-route"} else False
             with self._lock:
                 if path == "/v1/departures":
                     result = self.tools.next_departures(
@@ -571,6 +606,12 @@ class ActionApplication:
                     result = self.tools.get_api_info()
                 elif path == "/v1/usage":
                     result = self.get_usage()
+                elif path == "/v1/journey-route":
+                    if self.route_engine is None:
+                        return ActionResponse(503, {"ok": False, "error": "Route engine unavailable"})
+                    result = build_journey_route(self.tools, self.route_engine,
+                                                 _one(params, "legs") or _required("legs"))
+                    result["mapUrl"] = self._save_route_map(result)
                 elif path == "/v1/route":
                     if self.route_engine is None:
                         return ActionResponse(503, {"ok": False, "error": "Route engine unavailable"})
@@ -614,6 +655,10 @@ class ActionApplication:
                         result["snapshotError"] = snapshot.body["error"]
                 else:
                     result["snapshotError"] = "Map snapshots are not configured on this server"
+            if path in {"/v1/route", "/v1/journey-route"} and result.get("mapUrl"):
+                result["interactiveMapMarkdown"] = f"[Interactive route map]({result['mapUrl']})"
+                if result.get("mapImageUrl"):
+                    result["snapshotMarkdown"] = f"[View snapshot]({result['mapImageUrl']})"
             body = {"ok": True, "result": result}
             if len(json.dumps(body, ensure_ascii=False).encode("utf-8")) > MAX_RESPONSE_BYTES:
                 return ActionResponse(502, {"ok": False, "error": "RTT response was too large"})
@@ -630,6 +675,7 @@ class ActionApplication:
 
 def _render_route_map(route: Mapping[str, Any]) -> str:
     title = f"{route.get('origin', 'Rail route')} to {route.get('destination', '')}".strip()
+    basis = route.get("routeBasis", "topology-based suggested route")
     route_json = json.dumps(route, ensure_ascii=False).replace("<", "\\u003c")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -637,7 +683,7 @@ def _render_route_map(route: Mapping[str, Any]) -> str:
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://unpkg.com; script-src 'unsafe-inline' https://unpkg.com; img-src data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org">
 <title>{html.escape(title)}</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>html,body,#map{{height:100%;margin:0}} .summary{{position:absolute;z-index:1000;left:56px;right:12px;top:12px;max-width:640px;background:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 2px 12px #0004;font:15px system-ui}} .summary strong{{display:block}}</style></head>
-<body><div class="summary"><strong>{html.escape(title)}</strong>{html.escape(str(route.get('mileage', '?')))} railway miles · topology-based suggested route</div><div id="map" role="img" aria-label="Interactive map of the suggested railway route"></div>
+<body><div class="summary"><strong>{html.escape(title)}</strong>{html.escape(str(route.get('mileage', '?')))} railway miles · {html.escape(str(basis))}</div><div id="map" role="img" aria-label="Interactive map of the suggested railway route"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const data={route_json}; const map=L.map('map'); L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',{{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}}).addTo(map);
 const line=L.polyline(data.coordinates||[],{{color:'#6f42c1',weight:5}}).addTo(map); const esc=s=>String(s).replace(/[&<>\"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}}[c]));
@@ -660,6 +706,9 @@ def make_handler(application: ActionApplication) -> type[BaseHTTPRequestHandler]
                 "GET", parsed.path.rstrip("/") or "/", parse_qs(parsed.query), self.headers
             )
             application.record_request(parsed.path.rstrip("/") or "/", response.status)
+            evidence = response.body.get("requestEvidence") if isinstance(response.body, dict) else None
+            if evidence:
+                print(json.dumps({**evidence, "status": response.status}), flush=True)
             if isinstance(response.body, bytes):
                 payload = response.body
             elif isinstance(response.body, str):
@@ -675,8 +724,9 @@ def make_handler(application: ActionApplication) -> type[BaseHTTPRequestHandler]
             self.wfile.write(payload)
 
         def log_message(self, format: str, *args: Any) -> None:
-            # Avoid logging query strings, which can contain user-supplied journey details.
-            print(f"{self.address_string()} - {format % args}".split("?")[0])
+            # The structured completion event above excludes queries, credentials
+            # and client addresses, and is flushed for reliable action audits.
+            pass
 
     return Handler
 

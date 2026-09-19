@@ -194,9 +194,7 @@ class RTTRailTools:
         }
 
     def get_service_details(self, unique_identity: str) -> dict[str, Any]:
-        normalized = unique_identity.removeprefix("gb-nr:")
-        response = self.client.service(unique_identity=normalized, detailed=True)
-        service = (response.data or {}).get("service") or {}
+        service = self.get_service_schedule(unique_identity)
         calls = []
         for item in service.get("locations") or []:
             temporal = item.get("temporalData") or {}
@@ -218,6 +216,12 @@ class RTTRailTools:
             "reasons": service.get("reasons"),
             "calls": calls,
         }
+
+    def get_service_schedule(self, unique_identity: str) -> dict[str, Any]:
+        """Internal routing input, retaining technical passing points as well as calls."""
+        normalized = unique_identity.removeprefix("gb-nr:")
+        response = self.client.service(unique_identity=normalized, detailed=True)
+        return (response.data or {}).get("service") or {}
 
     def get_api_info(self) -> dict[str, Any]:
         return self.client.info().data

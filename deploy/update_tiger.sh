@@ -36,9 +36,10 @@ cp -a /opt/rtt-action/. "$backup/"
 echo "Backup: $backup"
 changed=1
 install -d -m 0755 /opt/rtt-action/deploy
-for file in action_api.py tiger.py tiger_schema.py tiger_icons.py; do
+for file in action_api.py tiger.py tiger_schema.py tiger_icons.py rail_assistant.py movebook_route.py journey_route.py; do
     install -m 0644 "$stage/source/rtt_app/$file" "/opt/rtt-action/rtt_app/$file"
 done
+install -m 0644 "$stage/source/GPT_ACTION_INSTRUCTIONS.md" /opt/rtt-action/GPT_ACTION_INSTRUCTIONS.md
 install -m 0644 "$stage/source/deploy/verify_tiger.py" /opt/rtt-action/deploy/verify_tiger.py
 systemctl restart rtt-action.service
 ready=0

@@ -30,15 +30,32 @@ class MovebookRouteEngine:
             raise ValueError("Choose up to 12 via TIPLOCs")
         if len(via) != len(set(via)):
             raise ValueError("A via TIPLOC can only be selected once")
+        return self._run({"origin": origin, "destination": destination, "via_tiplocs": via})
+
+    def route_schedule(self, origin: str, destination: str, origin_code: str,
+                       destination_code: str, calls: list[str], guidance: list[str]) -> dict[str, Any]:
+        """Keep every passenger call and use RTT's ordered passing points as guidance."""
+        if not 2 <= len(guidance) <= 2000:
+            raise ValueError("The journey must contain 2 to 2000 schedule points")
+        result = self._run({
+            "origin": origin, "destination": destination,
+            "origin_code": origin_code, "destination_code": destination_code,
+            "via_tiplocs": calls, "route_guidance": guidance,
+        })
+        # An older engine may silently ignore the new request fields. Never publish
+        # its unconstrained shortest path as the service's route.
+        if result.get("requested_route_guidance") != guidance:
+            raise MovebookRouteError("The route engine did not preserve schedule guidance")
+        return result
+
+    def _run(self, request: dict[str, Any]) -> dict[str, Any]:
         if not self.script.is_file():
             raise MovebookRouteError("The Movebook route engine is unavailable")
 
         try:
             completed = subprocess.run(
                 [self.python, str(self.script)],
-                input=json.dumps(
-                    {"origin": origin, "destination": destination, "via_tiplocs": via}
-                ),
+                input=json.dumps(request),
                 text=True,
                 capture_output=True,
                 timeout=self.timeout,
