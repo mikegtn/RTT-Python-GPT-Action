@@ -34,7 +34,8 @@ async def main(args):
             'code_challenge': challenge, 'code_challenge_method': 'S256'})
         assert response.status_code == 302, 'Authorization failed'
         flow = parse_qs(urlsplit(response.headers['location']).query)['request'][0]
-        assert (await client.post(base + '/owner/approve', json={'request': flow, 'allow': True})).status_code == 404
+        # The existing Action has no POST handler (501); no owner route is proxied.
+        assert (await client.post(base + '/owner/approve', json={'request': flow, 'allow': True})).status_code in {401, 404, 405, 501}
         bridge_key = Path('/etc/rtt-oauth-bridge.key').read_text().strip()
         response = await client.post('http://127.0.0.1:8766/owner/approve', headers={'x-rtt-owner-key': bridge_key},
                                      json={'request': flow, 'allow': True})

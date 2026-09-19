@@ -127,3 +127,25 @@ class OAuthTests(unittest.TestCase):
         source = Path(__file__).resolve().parents[1] / 'plugins/realtime-trains/skills/realtime-trains/references/MOVEBOOK.md'
         self.assertEqual(text, source.read_text(encoding='utf-8'))
         self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), '429e116b6fb27220901e20f480b14b158c59c7cca7e89db578a40e81a26d5e17')
+
+    def test_confidential_client_authentication_and_binding(self):
+        public_id = self.client_id
+        response = self.client.post('/register', json={'redirect_uris': [self.callback],
+            'token_endpoint_auth_method': 'client_secret_post', 'scope': 'rail:access',
+            'grant_types': ['authorization_code', 'refresh_token'], 'response_types': ['code']})
+        self.assertEqual(response.status_code, 201, response.text)
+        confidential = response.json()
+        self.client_id = confidential['client_id']
+        code = self.approve()['code'][0]
+        self.assertEqual(self.token(code, client_id=public_id).status_code, 400)
+        self.assertEqual(self.token(code).status_code, 401)
+        self.assertEqual(self.token(code, client_secret='wrong').status_code, 401)
+        response = self.token(code, client_secret=confidential['client_secret'])
+        self.assertEqual(response.status_code, 200, response.text)
+        token = response.json()
+        self.assertEqual(self.client.post('/token', data={'client_id': public_id,
+            'grant_type': 'refresh_token', 'resource': self.resource, 'refresh_token': token['refresh_token']}).status_code, 400)
+        self.assertEqual(self.rpc(token['access_token']).status_code, 200)
+        self.assertEqual(self.client.post('/revoke', data={'client_id': self.client_id,
+            'client_secret': confidential['client_secret'], 'token': token['access_token']}).status_code, 200)
+        self.assertEqual(self.rpc(token['access_token']).status_code, 401)
