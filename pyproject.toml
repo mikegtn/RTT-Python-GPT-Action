@@ -14,12 +14,14 @@ dependencies = []
 
 [project.optional-dependencies]
 snapshots = ["Pillow>=10.4,<13"]
+mcp = ["mcp==1.30.0", "tzdata>=2025.1; sys_platform == 'win32'"]
 
 [project.scripts]
 rtt = "rtt_app.cli:main"
 rtt-gui = "rtt_app.gui:main"
 rtt-assistant = "rtt_app.assistant_gui:main"
 rtt-action = "rtt_app.action_api:main"
+rtt-mcp = "rtt_app.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["rtt_app*"]

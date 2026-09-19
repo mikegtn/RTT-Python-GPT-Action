@@ -1,0 +1,27 @@
+[Unit]
+Description=Realtime Trains MCP adapter
+After=network-online.target rtt-action.service
+Wants=network-online.target rtt-action.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/rtt-mcp/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=/etc/rtt-action.env
+Environment=MCP_BACKEND_URL=http://127.0.0.1:8765
+ExecStart=/opt/rtt-mcp/current/.venv/bin/python -m rtt_app.mcp_server --transport http --host 127.0.0.1 --port 8766
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

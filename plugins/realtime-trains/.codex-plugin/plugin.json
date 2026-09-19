@@ -1,0 +1,23 @@
+{
+  "name": "realtime-trains",
+  "version": "0.1.0",
+  "description": "Evidence-backed UK rail services, journeys and route maps.",
+  "author": {
+    "name": "Mike Newman"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Realtime Trains",
+    "shortDescription": "UK rail services, journeys and maps.",
+    "longDescription": "Search dated RTT services, inspect train details and last reports, compare bounded journey options, and generate verified itinerary maps.",
+    "developerName": "Mike Newman",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Help me use Realtime Trains.",
+    "websiteURL": "https://rail.mikegtn.net",
+    "privacyPolicyURL": "https://rail.mikegtn.net/privacy",
+    "brandColor": "#157F82"
+  },
+  "mcpServers": "./.mcp.json",
+  "repository": "https://github.com/mikegtn/RTT-Python-GPT-Action"
+}

@@ -1,0 +1,1743 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Realtime Trains Rail Service Action",
+    "description": "Read live and scheduled UK rail services, allocations and Know Your Train coach data from the Realtime Trains API. Data can be absent or change.",
+    "version": "1.3.0"
+  },
+  "servers": [
+    {
+      "url": "https://rail.mikegtn.net"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "schemas": {},
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "paths": {
+    "/v1/departures": {
+      "get": {
+        "operationId": "getNextDepartures",
+        "summary": "Get the next passenger departures",
+        "description": "Returns times, destination, platform, allocation and live status.",
+        "parameters": [
+          {
+            "name": "station",
+            "in": "query",
+            "required": true,
+            "description": "UK station name or CRS code, such as Bristol Temple Meads or BRI.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "description": "Number of departures to return.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 5
+            }
+          },
+          {
+            "name": "minutes",
+            "in": "query",
+            "description": "How far ahead to search in minutes.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1439,
+              "default": 180
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful RTT response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the request completed successfully."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/services": {
+      "get": {
+        "operationId": "searchStationServices",
+        "summary": "Search arrivals or departures at a station",
+        "description": "Find a particular working or candidates for a forming service. Returns uniqueIdentity values that can be passed to getServiceDetails.",
+        "parameters": [
+          {
+            "name": "station",
+            "in": "query",
+            "required": true,
+            "description": "UK station name or CRS code, such as Bristol Temple Meads or BRI.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "time_from",
+            "in": "query",
+            "description": "ISO-8601 start datetime. Omit to start now.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "time_to",
+            "in": "query",
+            "description": "ISO-8601 end datetime. Do not combine with minutes.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "minutes",
+            "in": "query",
+            "description": "Window length when time_to is omitted.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1439,
+              "default": 180
+            }
+          },
+          {
+            "name": "filter_from",
+            "in": "query",
+            "description": "Only services previously calling at this station name or CRS code.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "filter_to",
+            "in": "query",
+            "description": "Only services subsequently calling at this station name or CRS code.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "movement",
+            "in": "query",
+            "description": "Whether to return arrivals, departures or both.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "arrivals",
+                "departures"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "description": "Maximum services to return.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 40,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful RTT response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the request completed successfully."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tiger/service": {
+      "get": {
+        "operationId": "getTigerServiceDetails",
+        "summary": "Get TIGER coach evidence for an exact RTT UID at a station",
+        "description": "Get coach facilities for an exact RTT UID at a TIPLOC. Supply unique_identity to resolve a CRS and reconcile with RTT; pass departure_date to verify the date. RTT remains authoritative for operational data. Missing facilities and unknown orientation must not be inferred.",
+        "parameters": [
+          {
+            "name": "station",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{3,7}$"
+            }
+          },
+          {
+            "name": "tiploc",
+            "in": "query",
+            "required": false,
+            "description": "Explicit TIGER TIPLOC, for example PADTON for RTT CRS PAD. Never send CRS as TIPLOC.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{3,7}$"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z][0-9]{5}$"
+            }
+          },
+          {
+            "name": "departure_date",
+            "in": "query",
+            "required": false,
+            "description": "RTT service departure date; never inferred from the current date.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "unique_identity",
+            "in": "query",
+            "required": false,
+            "description": "Exact opaque uniqueIdentity returned by RTT, for reconciliation.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "TIGER or RTT upstream error"
+          },
+          "503": {
+            "description": "TIGER is not configured"
+          },
+          "404": {
+            "description": "TIGER location not found, or no exact UID/date match"
+          },
+          "409": {
+            "description": "Multiple matching TIGER services; no selection made"
+          },
+          "200": {
+            "description": "TIGER evidence, optionally reconciled with RTT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "result": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "uid": {
+                              "type": "string"
+                            },
+                            "station": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": "string",
+                              "const": "TIGER"
+                            },
+                            "retrievedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "departureDate": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "dateVerified": {
+                              "type": "boolean"
+                            },
+                            "dateMatchBasis": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "dateEvidence": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            },
+                            "totalCoaches": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "orientationKnown": {
+                              "type": "boolean"
+                            },
+                            "frontCoach": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "rearCoach": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "firstClassCoaches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "wheelchairCoaches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "bikeCoaches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "cateringCoaches": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "warnings": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "coaches": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "coachNumber": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "coachLetter": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "position": {
+                                    "type": "string",
+                                    "enum": [
+                                      "front",
+                                      "intermediate",
+                                      "rear",
+                                      "unknown",
+                                      "frontAndRear"
+                                    ]
+                                  },
+                                  "iconUrl": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "description": "Small public SVG carriage icon. Render as a Markdown image beside the coach letter; position is schematic, not a vehicle model."
+                                  },
+                                  "leadingPowerCar": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "trailingPowerCar": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "firstClass": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "standardClass": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "wheelchairs": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "bikeStorage": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "catering": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "rawCoachList": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            },
+                            "rawService": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "required": [
+                            "uid",
+                            "station",
+                            "orientationKnown",
+                            "dateVerified",
+                            "coaches"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "rtt": {
+                              "type": "object",
+                              "additionalProperties": true
+                            },
+                            "tiger": {
+                              "type": "object",
+                              "properties": {
+                                "uid": {
+                                  "type": "string"
+                                },
+                                "station": {
+                                  "type": "string"
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "const": "TIGER"
+                                },
+                                "retrievedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "departureDate": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "dateVerified": {
+                                  "type": "boolean"
+                                },
+                                "dateMatchBasis": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "dateEvidence": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "value": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                },
+                                "totalCoaches": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ]
+                                },
+                                "orientationKnown": {
+                                  "type": "boolean"
+                                },
+                                "frontCoach": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "rearCoach": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "firstClassCoaches": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "wheelchairCoaches": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "bikeCoaches": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "cateringCoaches": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "warnings": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "coaches": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "coachNumber": {
+                                        "type": [
+                                          "integer",
+                                          "null"
+                                        ]
+                                      },
+                                      "coachLetter": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "position": {
+                                        "type": "string",
+                                        "enum": [
+                                          "front",
+                                          "intermediate",
+                                          "rear",
+                                          "unknown",
+                                          "frontAndRear"
+                                        ]
+                                      },
+                                      "iconUrl": {
+                                        "type": "string",
+                                        "format": "uri",
+                                        "description": "Small public SVG carriage icon. Render as a Markdown image beside the coach letter; position is schematic, not a vehicle model."
+                                      },
+                                      "leadingPowerCar": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "trailingPowerCar": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "firstClass": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "standardClass": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "wheelchairs": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "bikeStorage": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "catering": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      }
+                                    }
+                                  }
+                                },
+                                "rawCoachList": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                },
+                                "rawService": {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              },
+                              "required": [
+                                "uid",
+                                "station",
+                                "orientationKnown",
+                                "dateVerified",
+                                "coaches"
+                              ]
+                            },
+                            "coachEnrichmentApplied": {
+                              "type": "boolean"
+                            },
+                            "authority": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "conflicts": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            },
+                            "warnings": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "rtt",
+                            "tiger",
+                            "coachEnrichmentApplied",
+                            "conflicts"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/service": {
+      "get": {
+        "operationId": "getServiceDetails",
+        "summary": "Get detailed data for one train service",
+        "description": "Returns calls, allocation identities, associations and Know Your Train coach or formation data when RTT supplies it.",
+        "parameters": [
+          {
+            "name": "unique_identity",
+            "in": "query",
+            "required": true,
+            "description": "The exact uniqueIdentity from searchStationServices.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful RTT response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the request completed successfully."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/info": {
+      "get": {
+        "operationId": "getRttApiInfo",
+        "summary": "Get RTT API version and entitlements",
+        "description": "Returns the active RTT API metadata for diagnostics.",
+        "responses": {
+          "200": {
+            "description": "Successful RTT response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the request completed successfully."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "operationId": "getApiUsage",
+        "summary": "Get hosted Action API usage",
+        "description": "Returns aggregate request counts by endpoint and HTTP status. No credentials, query values or client identifiers are returned.",
+        "responses": {
+          "200": {
+            "description": "Aggregate Action API usage statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "trackingSince": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "UTC time from which the counters are available."
+                        },
+                        "lastRequestAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time",
+                          "description": "UTC time of the most recently counted request."
+                        },
+                        "totalRequests": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "requestsByEndpoint": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "responsesByStatus": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      },
+                      "required": [
+                        "trackingSince",
+                        "lastRequestAt",
+                        "totalRequests",
+                        "requestsByEndpoint",
+                        "responsesByStatus"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "result"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/route": {
+      "get": {
+        "operationId": "suggestRailRoute",
+        "summary": "Suggest a topology-backed railway route and map",
+        "description": "Uses the Movebook railway routing engine to resolve an origin and destination, calculate railway mileage and geometry, and return a map link plus valid alternative via points. This is an infrastructure route, not a timetable, ticket or guaranteed passenger itinerary.",
+        "parameters": [
+          {
+            "name": "include_snapshot",
+            "in": "query",
+            "description": "Set true only when the user requests a static map image. Returns mapImageUrl for Markdown embedding, fitted to the entire route.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": true,
+            "description": "Origin station name or CRS code.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "destination",
+            "in": "query",
+            "required": true,
+            "description": "Destination station name or CRS code.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "via",
+            "in": "query",
+            "description": "Optional comma-separated TIPLOC codes selected from candidates returned by an earlier route call, in travel order.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful RTT response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the request completed successfully."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/journey-route": {
+      "get": {
+        "operationId": "getJourneyRoute",
+        "summary": "Map a dated itinerary from verified RTT services",
+        "description": "Use for maps of actual trains or connecting journeys. Fetches each exact RTT service and follows its calls and passing points in order. Returns mapUrl, leg evidence and warnings. Geometry between schedule points is inferred; minimum connection times are not verified.",
+        "parameters": [
+          {
+            "name": "legs",
+            "in": "query",
+            "required": true,
+            "description": "JSON array of 1-6 ordered legs, each with unique_identity (exact RTT uniqueIdentity), origin and destination (station name or CRS). Example: [{\"unique_identity\":\"gb-nr:G01162:2026-09-19\",\"origin\":\"NCL\",\"destination\":\"PLY\"}]. Never invent identities.",
+            "schema": {
+              "type": "string",
+              "maxLength": 8000
+            }
+          },
+          {
+            "name": "include_snapshot",
+            "in": "query",
+            "description": "Default false. True only for an explicit request for a static snapshot or embedded image; a route map request alone means an interactive link.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful RTT response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the request completed successfully."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/map-snapshot": {
+      "get": {
+        "operationId": "getRailMapSnapshot",
+        "summary": "Create a static image of an existing route map",
+        "description": "On user request, render a saved route as a whole-route PNG. Use the id from the returned mapUrl. Embed returned mapImageUrl as a Markdown image and keep mapUrl as an interactive link.",
+        "parameters": [
+          {
+            "name": "map_id",
+            "in": "query",
+            "required": true,
+            "description": "The 24-character id at the end of a returned mapUrl.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{24}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful RTT response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the request completed successfully."
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or incorrect action API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RTT upstream API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Route engine unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
