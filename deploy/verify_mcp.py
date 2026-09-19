@@ -15,8 +15,8 @@ async def verify(args, key=None):
     config = {}
     for line in (Path(args.env_file).read_text().splitlines() if key is None else []):
         if '=' in line and not line.lstrip().startswith('#'):
-            key, value = line.split('=', 1)
-            config[key.strip()] = value.strip().strip('"').strip("'")
+            env_name, value = line.split('=', 1)
+            config[env_name.strip()] = value.strip().strip('"').strip("'")
     key = key or config.get('MCP_API_KEY') or config['ACTION_API_KEY']
     url = 'https://rail.mikegtn.net/mcp'
     async with httpx.AsyncClient(timeout=200, follow_redirects=False, trust_env=False) as unauth:
