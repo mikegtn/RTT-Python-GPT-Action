@@ -1,9 +1,10 @@
 """Verify production MCP via the official SDK. Credentials stay on the server."""
 import argparse
 import asyncio
-from datetime import date
+from datetime import date, datetime, time
 import json
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 from mcp import ClientSession
@@ -45,7 +46,7 @@ async def verify(args):
                     print(json.dumps({'tool': name, 'evidence': data['requestEvidence']}), flush=True)
                     return data['result']
                 journeys = await call('findJourneys', {'origin': 'ABD', 'destination': 'PLY',
-                    'time_from': args.date + 'T00:00:00+01:00', 'minutes': 1439,
+                    'time_from': datetime.combine(date.fromisoformat(args.date), time(), ZoneInfo('Europe/London')).isoformat(), 'minutes': 1439,
                     'interchanges': ['EDB', 'NCL', 'YRK']})
                 assert journeys['itineraries'], 'No Aberdeen to Plymouth itinerary in the bounded search'
                 chosen = journeys['itineraries'][0]

@@ -62,6 +62,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["result"]["lastReport"]["location"]["shortCodes"], ["ABD"])
         self.assertEqual(result["sourceRequestEvidence"], [{"requestId": "source"}])
         self.assertGreater(result["result"]["reportAgeSeconds"], 0)
+        data["calls"][0]["temporalData"]["isInterpolated"] = True
+        result = await RailWorkflows(backend).call("getTrainLocation", {"unique_identity": "opaque-rtt-identity"})
+        self.assertIsNone(result["result"]["lastReport"])
 
     async def test_identity_mismatch_fails_closed(self):
         async def backend(path, params):

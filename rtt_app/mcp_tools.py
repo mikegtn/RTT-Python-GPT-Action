@@ -186,6 +186,8 @@ class RailWorkflows:
                     now = datetime.now(timezone.utc)
                     reports = []
                     for call in service.get("calls") or []:
+                        if (call.get("temporalData") or {}).get("isInterpolated") is True:
+                            continue
                         for event in ("arrival", "pass", "departure"):
                             data = (call.get("temporalData") or {}).get(event) or {}
                             actual = data.get("realtimeActual")
@@ -195,6 +197,7 @@ class RailWorkflows:
                     report = max(reports, key=lambda r: timestamp(r["reportedAt"])) if reports else None
                     result = {"uniqueIdentity": identity, "lastReport": report,
                               "retrievedAt": now.isoformat(), "positionBasis": "Last actual RTT timing report; not GPS",
+                              "timeZone": "Europe/London for RTT timestamps without an explicit offset",
                               "reportAgeSeconds": max(0, int((now - timestamp(report["reportedAt"])).total_seconds())) if report else None,
                               "warnings": ["The train may have moved since this report."] if report else ["No actual location report is available."]}
             body = {"ok": True, "result": result}
@@ -257,6 +260,7 @@ class RailWorkflows:
         return {"origin": origin, "destination": destination, "timeFrom": start.isoformat(),
                 "timeTo": end.isoformat(), "itineraries": options[:3], "matchedOptions": len(options),
                 "coverage": coverage, "connectionBufferMinutes": connection_minutes,
+                "timeZone": "Europe/London for RTT timestamps without an explicit offset",
                 "minimumConnectionTimesVerified": False,
                 "coverageLimit": "Direct and supplied single-interchange routes only; six candidates per board, "
                                  "onward search under 24 hours, waits at most four hours. Not exhaustive; "
