@@ -15,6 +15,10 @@ test ! -e "$release" || { echo 'Release already exists; inspect before retrying.
 mkdir "$release"
 backup=$(mktemp -d /opt/rtt-mcp-backup.XXXXXX)
 cp -a "$config" "$backup/apache.conf"
+bridge=/var/www/html/admin/rtt-oauth.php
+test -f /var/www/html/includes/admin-auth.php
+test -f /var/www/html/includes/bootstrap.php
+if test -f "$bridge"; then cp -a "$bridge" "$backup/rtt-oauth.php"; fi
 previous=$(readlink "$root/current" || true)
 if test -f /etc/systemd/system/rtt-mcp.service; then
     cp -a /etc/systemd/system/rtt-mcp.service "$backup/rtt-mcp.service"
@@ -26,6 +30,11 @@ cleanup() {
     if [[ $status -ne 0 && $changed -eq 1 ]]; then
         echo "MCP update failed; restoring $backup" >&2
         cp -a "$backup/apache.conf" "$config"
+        if test -f "$backup/rtt-oauth.php"; then
+            cp -a "$backup/rtt-oauth.php" "$bridge"
+        else
+            rm -f -- "$bridge"
+        fi
         if test -n "$previous"; then
             ln -sfn "$previous" "$root/current"
         fi
@@ -46,9 +55,23 @@ tar -xzf "$release/source.tar.gz" --strip-components=1 -C "$release"
 python3 -m venv "$release/.venv"
 "$release/.venv/bin/pip" install --quiet "$release[mcp,snapshots]"
 (cd "$release" && .venv/bin/python -m unittest discover -q)
+php -l "$release/deploy/rtt-oauth.php"
+# Generate once on the host; never print, rotate, or reuse the Action key.
+python3 - <<'PY'
+import os, pwd, secrets
+from pathlib import Path
+path = Path('/etc/rtt-oauth-bridge.key')
+if not path.exists():
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
+    with os.fdopen(fd, 'w') as output:
+        output.write(secrets.token_urlsafe(48) + '\n')
+os.chown(path, 0, pwd.getpwnam('www-data').pw_gid)
+os.chmod(path, 0o640)
+PY
 changed=1
 ln -sfn "$release" "$root/current"
 install -m 0644 "$release/deploy/rtt-mcp.service" /etc/systemd/system/rtt-mcp.service
+install -o root -g www-data -m 0644 "$release/deploy/rtt-oauth.php" "$bridge"
 python3 - "$config" <<'PY'
 from pathlib import Path
 import sys
@@ -60,7 +83,14 @@ if 'ProxyPass /mcp ' not in text:
         raise SystemExit('Expected Action proxy rule missing or ambiguous')
     text = text.replace(marker, '    ProxyPass /mcp http://127.0.0.1:8766/mcp connectiontimeout=5 timeout=200\n'
                         '    ProxyPassReverse /mcp http://127.0.0.1:8766/mcp\n' + marker)
-    path.write_text(text)
+for endpoint in ['/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource',
+                 '/authorize', '/token', '/register', '/revoke']:
+    if f'ProxyPass {endpoint} ' not in text:
+        if text.count(marker) != 1:
+            raise SystemExit('Expected Action proxy rule missing or ambiguous')
+        text = text.replace(marker, f'    ProxyPass {endpoint} http://127.0.0.1:8766{endpoint} connectiontimeout=5 timeout=30\n'
+                            f'    ProxyPassReverse {endpoint} http://127.0.0.1:8766{endpoint}\n' + marker)
+path.write_text(text)
 PY
 apache2ctl configtest
 systemctl daemon-reload
@@ -74,5 +104,7 @@ done
 test "$ready" -eq 1
 systemctl reload apache2
 "$release/.venv/bin/python" "$release/deploy/verify_mcp.py" --protocol-only
+curl -fsS https://rail.mikegtn.net/.well-known/oauth-authorization-server >/dev/null
+curl -fsS https://rail.mikegtn.net/.well-known/oauth-protected-resource/mcp >/dev/null
 curl -fsS https://rail.mikegtn.net/health
 echo "Installed MCP $commit. Backup: $backup. Existing Action and secrets preserved."

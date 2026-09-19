@@ -1,8 +1,6 @@
 """Authenticated Streamable HTTP / stdio MCP adapter for the RTT Action.
 
-HTTP deliberately retains bearer authentication. It is suitable for trusted MCP
-clients with header support. ChatGPT OAuth account linking is a separate gate;
-this module never disables authentication to make a client connect.
+HTTP accepts scoped owner-approved OAuth tokens and the existing private API key.
 """
 from __future__ import annotations
 
@@ -66,7 +64,7 @@ class ActionBackend:
             return {"ok": False, "error": "RTT backend unavailable or returned invalid JSON"}
 
 
-def create_server(backend, plugin_root=PLUGIN_ROOT):
+def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False):
     workflows = RailWorkflows(backend)
     server = Server("realtime-trains", version="0.1.0", instructions=(
         "Use RTT tools for railway service facts. Preserve exact uniqueIdentity and requestEvidence. "
@@ -77,7 +75,9 @@ def create_server(backend, plugin_root=PLUGIN_ROOT):
 
     @server.list_tools()
     async def list_tools():
-        return [types.Tool(**{k: v for k, v in entry.items() if k != "path"})
+        return [types.Tool(**{k: v for k, v in entry.items() if k != "path"},
+                           **({"_meta": {"securitySchemes": [{"type": "oauth2", "scopes": ["rail:access"]}]}}
+                              if oauth_enabled else {}))
                 for entry in workflows.catalog.values()]
 
     @server.call_tool()
@@ -96,20 +96,27 @@ def create_server(backend, plugin_root=PLUGIN_ROOT):
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(body, ensure_ascii=False))],
                                     structuredContent=body, isError=not body.get("ok", False))
 
+    resources = {SKILL_URI: ("Realtime Trains behaviour", "SKILL.md"),
+                 "skill://realtime-trains/realtime-trains/references/MOVEBOOK.md":
+                     ("Original MOVEBOOK knowledge", "references/MOVEBOOK.md"),
+                 "skill://realtime-trains/realtime-trains/references/gpt-instructions.md":
+                     ("Original GPT instructions", "references/gpt-instructions.md")}
+
     @server.list_resources()
     async def list_resources():
-        return [types.Resource(uri=SKILL_URI, name="Realtime Trains behaviour", mimeType="text/markdown")]
+        return [types.Resource(uri=uri, name=name, mimeType="text/markdown")
+                for uri, (name, path) in resources.items()]
 
     @server.read_resource()
     async def read_resource(uri):
-        if str(uri) != SKILL_URI:
+        if str(uri) not in resources:
             raise ValueError("Unknown resource")
-        return (plugin_root / "skills" / "realtime-trains" / "SKILL.md").read_text(encoding="utf-8")
+        return (plugin_root / "skills" / "realtime-trains" / resources[str(uri)][1]).read_text(encoding="utf-8")
 
     return server
 
 
-def create_http_app(server, key):
+def create_http_app(server, key, oauth=None):
     if not key:
         raise ValueError("MCP bearer key is required")
     manager = StreamableHTTPSessionManager(server, json_response=True, stateless=True,
@@ -123,9 +130,14 @@ def create_http_app(server, key):
             headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
             authorization = headers.get("authorization", "")
             supplied = authorization[7:] if authorization.lower().startswith("bearer ") else ""
-            if not supplied or not secrets.compare_digest(supplied, key):
+            valid = bool(supplied) and secrets.compare_digest(supplied.encode(), key.encode())
+            if not valid and supplied and oauth and len(supplied) <= 256:
+                valid = await oauth.load_access_token(supplied) is not None
+            if not valid:
+                challenge = ('Bearer resource_metadata="https://rail.mikegtn.net/.well-known/oauth-protected-resource/mcp", scope="rail:access"'
+                             if oauth else 'Bearer realm="realtime-trains"')
                 await JSONResponse({"error": "Unauthorized"}, status_code=401,
-                                   headers={"WWW-Authenticate": 'Bearer realm="realtime-trains"'})(scope, receive, send)
+                                   headers={"WWW-Authenticate": challenge})(scope, receive, send)
                 return
             await manager.handle_request(scope, receive, send)
 
@@ -135,10 +147,10 @@ def create_http_app(server, key):
             yield
 
     async def health(request):
-        return JSONResponse({"ok": True, "service": "rtt-mcp", "authentication": "bearer"})
+        return JSONResponse({"ok": True, "service": "rtt-mcp", "authentication": "oauth2" if oauth else "bearer"})
 
     return Starlette(routes=[Route("/mcp", Endpoint(), methods=["GET", "POST", "DELETE"]),
-                             Route("/health", health)], lifespan=lifespan)
+                             Route("/health", health)] + (oauth.routes() if oauth else []), lifespan=lifespan)
 
 
 def main():
@@ -150,13 +162,18 @@ def main():
     load_dotenv()
     key = os.environ.get("ACTION_API_KEY", "").strip()
     backend = ActionBackend(key, os.environ.get("MCP_BACKEND_URL", "http://127.0.0.1:8765"))
-    server = create_server(backend)
+    oauth = None
+    if args.transport == "http" and os.environ.get("OAUTH_DATABASE"):
+        from .mcp_oauth import OwnerOAuth
+        oauth = OwnerOAuth(os.environ["OAUTH_DATABASE"],
+                           Path(os.environ["OAUTH_BRIDGE_KEY_FILE"]).read_text().strip())
+    server = create_server(backend, oauth_enabled=oauth is not None)
     logging.basicConfig(level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     if args.transport == "http":
         import uvicorn
-        uvicorn.run(create_http_app(server, os.environ.get("MCP_API_KEY", key)),
+        uvicorn.run(create_http_app(server, os.environ.get("MCP_API_KEY", key), oauth),
                     host=args.host, port=args.port, access_log=False)
     else:
         async def run():

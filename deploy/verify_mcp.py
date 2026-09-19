@@ -11,13 +11,13 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 
-async def verify(args):
+async def verify(args, key=None):
     config = {}
-    for line in Path(args.env_file).read_text().splitlines():
+    for line in (Path(args.env_file).read_text().splitlines() if key is None else []):
         if '=' in line and not line.lstrip().startswith('#'):
             key, value = line.split('=', 1)
             config[key.strip()] = value.strip().strip('"').strip("'")
-    key = config.get('MCP_API_KEY') or config['ACTION_API_KEY']
+    key = key or config.get('MCP_API_KEY') or config['ACTION_API_KEY']
     url = 'https://rail.mikegtn.net/mcp'
     async with httpx.AsyncClient(timeout=200, follow_redirects=False, trust_env=False) as unauth:
         response = await unauth.post(url, json={})
@@ -30,6 +30,8 @@ async def verify(args):
                 listed = await session.list_tools()
                 assert len(listed.tools) == 12
                 await session.read_resource('skill://realtime-trains/realtime-trains/SKILL.md')
+                knowledge = await session.read_resource('skill://realtime-trains/realtime-trains/references/MOVEBOOK.md')
+                assert 'TIGER' in knowledge.contents[0].text
                 print(json.dumps({'protocol': initialized.protocolVersion, 'tools': [t.name for t in listed.tools],
                                   'unauthenticatedStatus': response.status_code}), flush=True)
                 if args.protocol_only:

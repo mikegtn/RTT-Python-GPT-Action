@@ -1,0 +1,2 @@
+# Preserve the recovered GPT knowledge attachment exactly, including CRLF.
+plugins/realtime-trains/skills/realtime-trains/references/MOVEBOOK.md -text -whitespace
