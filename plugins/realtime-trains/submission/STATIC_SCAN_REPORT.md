@@ -1,83 +1,83 @@
 # Realtime Trains MCP — static preflight scan report
 
-**Prepared:** 25 September 2026  
-**Endpoint under review:** `https://rail.mikegtn.net/mcp`  
-**Source reviewed:** `master` at the point `plugin-submission-draft` was created  
-**Overall result:** **NOT READY FOR PUBLIC SUBMISSION**
+**Updated:** 26 September 2026  
+**Target endpoint:** `https://rail.mikegtn.net/mcp`  
+**Branch:** `plugin-submission-draft`  
+**Source remediation status:** **READY TO DEPLOY AND RUN PLATFORM SCAN**  
+**Public submission status:** **NOT YET READY TO SUBMIT**
 
 ## Scope and limitation
 
-This is a source- and contract-level preflight review of the MCP server, OAuth implementation, local plugin package and tests. It is not the OpenAI Platform portal's authoritative **Scan Tools** result: the submission portal is not exposed as a writable tool in the current ChatGPT session, and the execution environment could not resolve the production hostname. No claim is made that a Platform draft has been saved or that the portal scan has passed.
+This is a source- and contract-level preflight review. It is **not** the OpenAI
+Platform portal's authoritative **Scan Tools** result. The submission portal is not
+available as a writable action in this ChatGPT session, and the changes on this
+branch have not yet been deployed to the production VPS.
 
-The report deliberately separates verified source findings from likely portal outcomes.
+The five source remediations requested for the public release are complete on this
+branch. The remaining blockers are deployment, the real Platform scan/domain
+challenge, listing assets/pages, publisher verification, and confirmation of data
+and branding rights.
 
 ## Executive result
 
-| Severity | Count | Summary |
-|---|---:|---|
-| Blocker | 3 | Public authentication model; OAuth security-scheme placement; actual portal draft/scan and domain verification not completed |
-| High | 3 | Broad output schemas; diagnostic evidence exposed to models; public listing/support/terms/demo requirements incomplete |
-| Medium | 4 | Skills import protocol absent; local package uses static bearer configuration; publisher-facing tools in public catalog; brand/data authorisation needs confirmation |
-| Pass | 8 | Twelve discoverable tools, bounded inputs, annotations, Streamable HTTP, structured content, OAuth discovery implementation, PKCE/resource checks, explicit rail-data limitations |
+| Area | Status | Notes |
+|---|---|---|
+| Public authentication model | PASS IN SOURCE | MCP is public/no-auth; upstream RTT credential stays server-side |
+| Tool security metadata | PASS IN SOURCE | Top-level `securitySchemes: [{"type":"noauth"}]` plus `_meta` mirror |
+| Output schemas | PASS IN SOURCE | Per-tool model-facing result schemas replace the generic `{ok,...}` schema |
+| Diagnostic evidence | PASS IN SOURCE | Request evidence is logged server-side and omitted from public MCP results |
+| Skills strategy | PASS IN SOURCE | v0.1.0 is explicitly MCP-tools-only; no draft Skills extension is advertised |
+| Deployment | PENDING | Deploy branch commit to the VPS and run the production verifier |
+| OpenAI Platform Scan Tools | PENDING | Must be run against the deployed production endpoint |
+| Domain verification | PENDING | Complete the portal-issued challenge |
+| Listing material | PENDING | Support, terms, privacy verification, icon and demo |
+| Publisher / data rights | PENDING | Verify Platform publisher identity and public-use/branding permissions |
 
-## Blockers
+## Remediation 1 — public no-auth transport
 
-### B1 — OAuth is implemented as private-owner approval, not public-user authentication
+**Status: complete in source.**
 
-**Evidence in source**
+The public `/mcp` route no longer accepts or requires an end-user bearer token or
+OAuth flow. `ACTION_API_KEY` remains private on the server and is used only for
+the sidecar-to-Action loopback request.
 
-- The module describes itself as `Private-owner OAuth`.
-- Authorisation is redirected to the publisher's private admin approval page.
-- Issued tokens use the fixed subject `site-owner`.
-- The redirect allow-list is intentionally limited to ChatGPT callbacks.
+The retired owner-only OAuth implementation, tests and consent bridge have been
+removed from this branch. The deployment script removes the old public OAuth proxy
+routes and consent page. It deliberately leaves the old OAuth database/key on the
+host during the transition so rollback remains possible.
 
-**Why this blocks a public plugin**
+A simple process-level anonymous request ceiling is also present; upstream
+credentials, Action concurrency limits and RTT rate limits remain server-side.
 
-A public directory plugin must have an authentication path that ordinary intended users and reviewers can complete. The current flow requires publisher-admin approval and does not represent or onboard individual public users. It can support a personal/private connector, but it is not yet a generally usable public OAuth product.
+## Remediation 2 — canonical no-auth security schemes
 
-**Resolution options**
+**Status: complete in source.**
 
-1. For a read-only public rail plugin, expose the MCP endpoint without end-user authentication and enforce upstream secrets, rate limits and abuse controls entirely on the server; or
-2. Implement a genuine public account/sign-in and consent flow where each user receives a distinct subject and can independently authorise access; or
-3. Keep the owner-only OAuth flow and distribute the plugin privately rather than submitting it to the public directory.
-
-### B2 — OAuth `securitySchemes` are only placed in tool `_meta`
-
-**Evidence in source**
-
-`list_tools()` injects:
+Every MCP tool is published with both:
 
 ```json
-{
-  "_meta": {
-    "securitySchemes": [
-      {"type": "oauth2", "scopes": ["rail:access"]}
-    ]
-  }
+"securitySchemes": [{"type": "noauth"}]
+```
+
+and the compatibility mirror:
+
+```json
+"_meta": {
+  "securitySchemes": [{"type": "noauth"}]
 }
 ```
 
-The tool descriptor does not expose the same scheme as a top-level `securitySchemes` field. Current OpenAI plugin guidance expects the canonical scheme at tool level, with `_meta.securitySchemes` retained as a compatibility mirror where needed.
+The project remains pinned to MCP Python 1.30.0. Its `Tool` model permits extension
+fields, allowing the OpenAI top-level `securitySchemes` field to be serialized
+without changing the MCP dependency solely for this release.
 
-**Likely portal impact**
+The production verifier explicitly checks both declarations on all 12 tools.
 
-The scanner may import the tools but fail to classify their authentication correctly, or may raise an authentication/schema warning. Runtime OAuth discovery and the 401 challenge are present, but they do not replace correct tool-level metadata.
+## Remediation 3 — model-facing output schemas
 
-**Required fix**
+**Status: complete in source; runtime validation still required after deployment.**
 
-Expose the canonical OAuth scheme in the tool descriptor's top-level `securitySchemes` and mirror it in `_meta.securitySchemes`. Verify the exact shape against the MCP SDK version used by the server and upgrade the pinned SDK if the current `types.Tool` model cannot represent the field.
-
-### B3 — Authoritative Platform draft, scan and domain challenge are not complete
-
-The OpenAI Platform organisation/project, verified publisher identity, portal draft ID, portal scan output and portal-issued domain challenge token are not available through the current connected tools. These steps must be completed in the actual submission portal before the plugin can be submitted.
-
-This is an operational blocker rather than a defect in the MCP source.
-
-## High-priority findings
-
-### H1 — Output schemas are too broad to describe actual structured content
-
-Every tool advertises essentially:
+The previous generic schema:
 
 ```json
 {
@@ -88,87 +88,48 @@ Every tool advertises essentially:
 }
 ```
 
-Actual results contain detailed `result`, `requestEvidence`, `sourceRequestEvidence`, errors, maps, services and route structures. The broad schema weakens tool selection, validation and reviewability.
+has been removed from the MCP catalog.
 
-**Required fix**
+The public MCP contract now describes the result object for each tool. Stable
+workflow fields are explicit, including departure-board fields, service identities,
+journey coverage, last-report metadata, route-map URLs and snapshot fields.
+Detailed TIGER output reuses the existing explicit TIGER result schema. Where an
+upstream RTT or topology payload can legitimately evolve, only that nested portion
+is left extensible rather than making the whole MCP result unconstrained.
 
-Define exact success and error output schemas for every public tool, or at minimum for coherent groups of tools. Keep returned `structuredContent` aligned with the declared schema.
+The MCP boundary now returns the result object directly as `structuredContent`,
+so `outputSchema` describes the object the model actually receives.
 
-### H2 — Diagnostic `requestEvidence` is deliberately exposed in ordinary tool results
+## Remediation 4 — remove routine diagnostic evidence
 
-The server logs request evidence and also returns it in model-visible structured content. Workflow tools generate fresh request IDs and include source request evidence. Server instructions explicitly tell the model to preserve it.
+**Status: complete in source.**
 
-**Risk**
+Backend Action calls can still contain `requestEvidence` and composite
+`sourceRequestEvidence` for operational logging and regression diagnostics.
+The public MCP adapter does not return either field in successful
+`structuredContent` or tool text.
 
-Public submission guidance discourages unnecessary trace IDs, request IDs and internal diagnostic payloads in user-facing/model-facing results. This also enlarges schemas and may disclose implementation detail without user benefit.
+The server instruction to preserve request evidence has been removed. Exact RTT
+`uniqueIdentity` values remain model-visible because they are functional service
+identifiers needed by detail, location and mapping follow-ups.
 
-**Required fix**
+## Remediation 5 — first release is MCP-tools-only
 
-- Keep request evidence in server logs by default.
-- Return only evidence needed for genuine user-facing provenance.
-- Put deep diagnostics behind a separately named, publisher-only tool or an explicit diagnostic mode that is excluded from the public catalog.
-- Remove the instruction to preserve `requestEvidence` in routine responses.
+**Status: complete in source.**
 
-### H3 — Required listing and review material is incomplete
+Version 0.1.0 does not advertise the draft MCP Skills extension and the public MCP
+server no longer exposes the packaged skill files through generic resources.
 
-Still needed or unverified:
+The existing `plugins/realtime-trains/skills/` material remains in the repository
+for local/package use and future migration. It is not part of the v0.1.0 public
+MCP import contract.
 
-- Public support URL
-- Public terms URL
-- Publicly resolving privacy policy
-- Final icon/logo and rights confirmation
-- Demo recording URL
-- Verified publisher identity and eligible project
-- Portal annotation justifications
-- Portal domain challenge
-- Review credentials or a public no-auth flow
+This avoids coupling the first public release to the draft Skills extension.
+A later plugin release can add native imported skills deliberately.
 
-The copy-ready values and placeholders are in `OPENAI_PLATFORM_DRAFT.md`.
+## Public tool inventory
 
-## Medium-priority findings
-
-### M1 — The server exposes skills as generic resources, not the current skills extension
-
-The server implements `resources/list` and `resources/read` for `SKILL.md` and references. It does not implement `skills/list` and `skills/get`.
-
-**Likely impact**
-
-The tools should still be discoverable, and the skill can be read manually as a resource, but the Platform scanner is unlikely to import it as a native plugin skill automatically.
-
-**Resolution**
-
-Implement the supported skills extension, or upload/package the skill separately and treat the MCP submission as tool-only for version 0.1.0.
-
-### M2 — Local plugin package and production submission auth models are inconsistent
-
-`plugins/realtime-trains/.mcp.json` uses a static environment bearer token:
-
-```json
-{
-  "headers": {
-    "Authorization": "Bearer ${RTT_MCP_API_KEY}"
-  }
-}
-```
-
-The proposed Platform submission uses OAuth. This is acceptable for private local development, but the README and package should make the distinction explicit so a static publisher credential is never bundled or mistaken for a public user-auth method.
-
-### M3 — Two publisher-facing diagnostic tools are in the public catalog
-
-- `getRttApiInfo`
-- `getApiUsage`
-
-They are correctly marked read-only, but they have limited value to normal rail users and reveal service-operational metadata. Consider excluding them from the public catalog while retaining them for private diagnostics.
-
-### M4 — Data-source and brand authorisation need documentary confirmation
-
-The public listing should not imply an official relationship beyond what exists. Confirm the rights to use the product name, returned rail data, formations, map data, tiles and any logos or marks. Keep required attribution in the listing or responses.
-
-## Passed checks
-
-### P1 — Tool inventory is finite and stable
-
-The production verifier and tests expect **12 tools**:
+The verifier expects exactly 12 tools:
 
 1. `getNextDepartures`
 2. `searchStationServices`
@@ -183,102 +144,108 @@ The production verifier and tests expect **12 tools**:
 11. `getTrainLocation`
 12. `getRouteDetails`
 
-### P2 — Names, titles and descriptions are present
+All tools remain non-destructive. The three map-artifact tools are intentionally
+not marked read-only/idempotent because they create saved map or image artifacts.
 
-Each catalog entry contains a machine name, human-readable title, description and input schema.
+## Regression coverage changed with this branch
 
-### P3 — Input schemas are bounded
+The transport tests now verify that:
 
-Inputs generally use:
+- MCP initialization succeeds without credentials.
+- All 12 tools expose top-level and mirrored `noauth` security metadata.
+- Every tool has a non-generic output schema.
+- Public structured content is the result object itself.
+- `requestEvidence` and `sourceRequestEvidence` are absent from public results.
+- An untrusted Origin is still rejected.
+- The private Action backend still refuses insecure remote destinations.
 
-- `additionalProperties: false`
-- Required-field lists
-- String length limits
-- Integer minimums and maximums
-- Enumerations
-- Array item/count limits
-- A strict 24-character hexadecimal map ID pattern
-- Exact opaque service identities with a warning not to construct them
+The production verifier now connects to `https://rail.mikegtn.net/mcp` without a
+credential and checks:
 
-### P4 — Risk annotations are present on every tool
+- MCP initialization and the 12-tool inventory.
+- `noauth` metadata and output schemas.
+- Result-only structured content without diagnostic evidence.
+- Aberdeen-to-Plymouth bounded journey search.
+- Exact service details, last reported location and route details.
+- Journey route map and PNG snapshot.
+- Public accessibility of the resulting HTML map and PNG.
 
-Every tool currently declares:
+## Remaining non-source blockers
 
-- `readOnlyHint`
-- `destructiveHint`
-- `idempotentHint`
-- `openWorldHint`
+### 1. Deploy this branch
 
-The three map-artifact tools are deliberately not marked read-only or idempotent. No tool is marked destructive.
+The production endpoint will continue to reflect the currently deployed build
+until a commit from this branch is installed on the VPS. Run the updated
+`deploy/update_mcp.sh <full-commit-sha>` and then the full
+`deploy/verify_mcp.py` regression.
 
-### P5 — Streamable HTTP and structured content are implemented
+Do not run the authoritative Platform scan against the old OAuth deployment and
+treat its result as representative of this branch.
 
-The server uses the MCP SDK's Streamable HTTP session manager, stateless mode and JSON responses. Tool results include both text content and structured content.
+### 2. Run the actual OpenAI Platform Scan Tools action
 
-### P6 — OAuth discovery and challenge logic exist
+After deployment, create/update the **With MCP** draft using:
 
-Source includes:
+- Universal URL: `https://rail.mikegtn.net/mcp`
+- Authentication: **None / public**
+- Imported MCP skills: none for v0.1.0
 
-- Protected-resource metadata
-- OAuth authorisation-server metadata
-- Dynamic client registration
-- Authorisation, token and revocation endpoints
-- `WWW-Authenticate` with resource metadata and `rail:access`
+Record the returned scan errors and warnings verbatim. Source remediation should
+not be considered complete in production until this scan succeeds.
 
-### P7 — OAuth protocol controls are strong for the current private flow
+### 3. Complete domain verification
 
-The implementation checks:
+Serve exactly the portal-issued verification token at the required challenge
+location and complete verification in the portal.
 
-- PKCE S256 challenge format
-- Exact MCP resource/audience
-- Exact scope
-- Exact callback allow-list
-- Short-lived authorisation codes
-- Hashed stored bearer secrets
-- Access/refresh expiry
-- Refresh-token rotation and family revocation
-- Rate limits and request-body limits
+### 4. Finish listing/reviewer material
 
-### P8 — Rail-domain limitations are unusually explicit
+Still required or unverified:
 
-The contracts correctly disclose that:
+- Public support/contact URL
+- Public terms URL
+- Publicly resolving and current privacy policy
+- Final icon/logo and rights confirmation
+- Demo recording URL
+- Verified publisher identity and eligible Platform project
+- Annotation justifications requested by the portal
+- Five positive and three negative tests already drafted in
+  `OPENAI_PLATFORM_DRAFT.md`
 
-- Latest train location is a last actual timing report, not GPS.
-- Forecasts are not observations.
-- Journey search is bounded and not exhaustive.
-- Official minimum interchange times are not verified.
-- Route geometry between schedule points may be inferred.
-- Infrastructure routes are not guaranteed passenger itineraries.
-- Exact service identities must be preserved.
+### 5. Confirm public data/brand permissions
 
-These are good review and user-trust characteristics.
+Before submission, confirm that the applicable Realtime Trains plan/terms permit
+the intended public plugin use and that required Realtime Trains attribution is
+visible. Confirm the same for any other data, formation, map/tile or branding
+assets used by the listing or generated results.
 
-## Expected portal scan outcome — forecast, not an actual result
+The listing must not imply an official OpenAI or Realtime Trains relationship
+beyond the permissions actually held.
 
-Once a suitable public auth model is in place and the portal can authorise successfully, the scanner should discover 12 tools with titles, descriptions, bounded inputs and complete risk annotations. It is likely to produce warnings or failures around authentication metadata and broad output schemas until B2 and H1 are fixed. Native skill import is unlikely until M1 is addressed.
+## Optional cleanup after the first successful public deployment
 
-## Recommended remediation order
+These are not blockers for the five requested remediations:
 
-1. Decide whether this is a **private owner plugin** or a **public directory plugin**.
-2. Replace owner-only OAuth with public no-auth access or a genuine public-user OAuth flow.
-3. Add canonical top-level tool `securitySchemes` and retain the compatibility mirror.
-4. Replace broad output schemas with exact schemas.
-5. Remove routine diagnostic evidence from public outputs and instructions.
-6. Decide whether to remove publisher diagnostics from the public catalog.
-7. Implement native skills discovery or make version 0.1.0 explicitly MCP-tools-only.
-8. Publish and verify privacy, support and terms pages; prepare icon and demo video.
-9. Create the actual Platform draft, authorise it, run **Scan Tools**, record the returned errors/warnings verbatim, and fix source-side findings.
-10. Complete domain verification and reviewer tests, then submit.
+- Decide whether `getRttApiInfo` and `getApiUsage` add enough end-user value to
+  remain in the public directory tool catalog.
+- After the rollback window, remove the retired OAuth database/key from the host
+  through a deliberate secrets-cleanup change.
+- Consider upgrading MCP Python from 1.30.0 separately; do not combine that
+  dependency migration with the publication change unless the Platform scan
+  requires it.
+- Add native imported skills in a later version once the desired skill contract
+  is settled.
 
-## Completion criteria
+## Completion criteria for submission
 
-The plugin is ready to submit only when:
+The plugin is ready to submit when all of the following are true:
 
-- Intended users can authenticate without publisher-admin access, or the public endpoint intentionally requires no user auth.
-- Portal Scan Tools completes successfully against the production endpoint.
-- Tool security schemes and output schemas pass validation.
-- Every annotation requiring justification has one.
-- Privacy, support, terms, logo, demo and publisher identity are complete.
+- The no-auth branch commit is deployed to production.
+- The production verifier passes without credentials.
+- Platform **Scan Tools** succeeds against the deployed endpoint.
 - Domain ownership is verified.
-- Exactly five positive and three negative review cases are entered.
-- The source commit deployed to production is recorded in the submission notes.
+- Privacy, support, terms, icon and demo are complete.
+- Publisher identity/project eligibility is complete.
+- Public-use and attribution obligations for underlying data/branding are
+  confirmed.
+- The exact deployed commit SHA is recorded in reviewer notes.
