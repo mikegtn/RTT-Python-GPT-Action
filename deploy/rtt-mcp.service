@@ -11,10 +11,6 @@ WorkingDirectory=/opt/rtt-mcp/current
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile=/etc/rtt-action.env
 Environment=MCP_BACKEND_URL=http://127.0.0.1:8765
-Environment=OAUTH_DATABASE=/var/lib/rtt-mcp/oauth.sqlite3
-Environment=OAUTH_BRIDGE_KEY_FILE=/etc/rtt-oauth-bridge.key
-StateDirectory=rtt-mcp
-StateDirectoryMode=0700
 UMask=0077
 ExecStart=/opt/rtt-mcp/current/.venv/bin/python -m rtt_app.mcp_server --transport http --host 127.0.0.1 --port 8766
 Restart=on-failure
