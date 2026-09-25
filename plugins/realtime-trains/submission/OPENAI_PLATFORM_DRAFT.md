@@ -3,7 +3,7 @@
 **Prepared:** 25 September 2026  
 **Target MCP endpoint:** `https://rail.mikegtn.net/mcp`  
 **Submission route:** With MCP  
-**Draft status:** Pre-submission; do not submit until the blockers in `STATIC_SCAN_REPORT.md` are resolved.
+**Draft status:** Source remediation applied on `plugin-submission-draft`; deploy this branch, run the authoritative Platform **Scan Tools**, and complete the remaining listing/domain items before submission.
 
 This file is the copy-ready content for the OpenAI Platform submission form. It is not evidence that a draft has already been saved in the Platform portal.
 
@@ -17,14 +17,15 @@ This file is the copy-ready content for the OpenAI Platform submission form. It 
 | Initial country availability | United Kingdom |
 | MCP URL type | Universal |
 | MCP URL | `https://rail.mikegtn.net/mcp` |
-| Authentication | OAuth 2.0 authorisation-code flow with PKCE S256 |
-| Scope | `rail:access` |
+| Authentication | None — public MCP endpoint |
+| Tool security | `securitySchemes: [{"type":"noauth"}]` on every tool, mirrored in `_meta` |
 | Website | `https://rail.mikegtn.net` |
 | Privacy policy | `https://rail.mikegtn.net/privacy` — verify that this resolves publicly before submission |
 | Support URL | **REQUIRED:** add a public HTTPS support/contact page |
 | Terms of service | **REQUIRED:** add a public HTTPS terms page |
 | Repository | `https://github.com/mikegtn/RTT-Python-GPT-Action` |
 | Custom UI | None in version 0.1.0 |
+| Imported MCP skills | None in version 0.1.0; first public release is MCP-tools-only |
 | Logo / icon | **REQUIRED:** upload final artwork and confirm rights |
 | Demo recording | **REQUIRED:** add a public or reviewer-accessible video URL |
 
@@ -67,6 +68,7 @@ Initial read-focused release providing station departures, dated service search,
 - Infrastructure routes are not timetables, tickets or guaranteed passenger itineraries.
 - Generate a static snapshot only when the user explicitly asks for an image or snapshot.
 - Do not expose credentials, bearer tokens, internal request traces or server diagnostics.
+- Public MCP tool results contain only the declared result object; backend `requestEvidence` remains server-side.
 
 ## 5. Tool inventory and annotation justifications
 
@@ -146,23 +148,24 @@ Initial read-focused release providing station departures, dated service search,
 ## 8. Reviewer notes
 
 - The endpoint uses Streamable HTTP at `/mcp`.
-- The intended public scope is `rail:access`.
+- The MCP endpoint is intentionally public and requires no end-user authentication.
 - Every production tool is intended to be non-destructive.
 - Three map tools create temporary/server-side artifacts and are therefore deliberately not marked read-only or idempotent.
 - Live railway data can change between calls.
 - The service's exact opaque identities must remain unchanged through detail, location and mapping workflows.
-- Reviewers need a normal, stable authentication route that does not require access to the publisher's private site-administrator account. This is currently a blocker described in `STATIC_SCAN_REPORT.md`.
+- Version 0.1.0 is intentionally MCP-tools-only; the public endpoint does not advertise the draft MCP Skills extension.
 
 ## 9. Manual portal items still required
 
 - Select the verified publisher identity and eligible Platform project.
 - Confirm the project is eligible for public plugin submission.
-- Enter the universal MCP URL and complete OAuth authorisation.
+- Enter the universal MCP URL and select **No authentication / public**.
 - Run the portal's **Scan Tools** action and save its actual result.
 - Enter a justification for each annotation the portal asks about.
 - Complete the portal-issued domain challenge.
 - Add support and terms URLs.
 - Add final icon/logo assets.
 - Add the demo recording URL.
+- Confirm the deployed tool list shows top-level and `_meta` `noauth` security schemes and result-only output schemas.
 - Confirm data-source and brand authorisation.
 - Submit only after every blocker in the scan report is closed.
