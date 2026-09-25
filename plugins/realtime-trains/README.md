@@ -1,91 +1,127 @@
-# Realtime Trains plugin migration
+# Realtime Trains plugin
 
-This package preserves the Realtime Trains Assistant behaviour and exposes twelve
-MCP tools through `https://rail.mikegtn.net/mcp`. It is a private, authenticated
-integration. The original GPT Action continues to run independently.
+This package exposes the Realtime Trains rail assistant through the public,
+read-only MCP endpoint at `https://rail.mikegtn.net/mcp`. The public MCP
+connection does not require an end-user account or bearer token. Realtime Trains
+credentials remain on the server and are used only by the private Action backend.
 
 ## Tools
 
-The nine existing operations retain their names: `getNextDepartures`,
-`searchStationServices`, `getServiceDetails`, `getTigerServiceDetails`,
-`getRttApiInfo`, `getApiUsage`, `suggestRailRoute`, `getJourneyRoute`, and
-`getRailMapSnapshot`. MCP `getJourneyRoute.legs` is a native array; the adapter
-encodes it for the existing Action internally. Results preserve `uniqueIdentity`
-and `requestEvidence` without rewriting them.
+The server currently exposes twelve MCP tools:
 
-Additional tools:
+- `getNextDepartures`
+- `searchStationServices`
+- `getServiceDetails`
+- `getTigerServiceDetails`
+- `getRttApiInfo`
+- `getApiUsage`
+- `suggestRailRoute`
+- `getJourneyRoute`
+- `getRailMapSnapshot`
+- `findJourneys`
+- `getTrainLocation`
+- `getRouteDetails`
 
-- `findJourneys`: direct trains and up to three caller-supplied interchanges;
-  six candidates per search, up to three returned options. Uses advertised
-  times, passenger call restrictions, cancellations and chronological checks.
-  It is not an exhaustive national journey planner. A connection buffer is an
-  assumption, not a sourced minimum interchange time.
-- `getTrainLocation`: last actual RTT timing report, its timestamp and age.
-  Never GPS and never a forecast presented as an observed position.
-- `getRouteDetails`: ordered service-detail calls/timing points, without
-  claiming geometry, distance, or a complete technical schedule.
+Every tool declares a canonical top-level `securitySchemes: [{"type":"noauth"}]`
+entry plus the documented `_meta.securitySchemes` compatibility mirror.
 
-Composite tools return their own audit event plus `sourceRequestEvidence` for
-the backend calls actually completed. Maps and snapshots are annotated as
-non-destructive writes because they create persistent artifacts.
+Tool calls return only the public result object as `structuredContent`. Internal
+Action `requestEvidence` and composite source request IDs remain server-side and
+are not returned to ChatGPT or Codex. Exact RTT `uniqueIdentity` values remain in
+results because follow-up service, location and mapping calls need them.
+
+The server publishes explicit output schemas for the model-facing result of every
+tool. Upstream RTT objects that can legitimately evolve remain typed as bounded
+nested objects, while the stable fields used by follow-up workflows are declared
+explicitly.
+
+## Important behaviour
+
+- `findJourneys` searches direct trains and up to three caller-supplied
+  interchange stations. It is bounded and not an exhaustive national journey
+  planner.
+- Minimum interchange times are not verified; the connection buffer is a search
+  assumption.
+- `getTrainLocation` returns the latest actual RTT timing report. It is not GPS
+  and must not be presented as the train's guaranteed present position.
+- Forecast timings are forecasts, not observations.
+- Route geometry between schedule points can be inferred by the topology engine.
+- Infrastructure routes are not timetables, tickets or guaranteed passenger
+  itineraries.
+- Snapshots are generated only when explicitly requested.
 
 ## Connection
 
-The remote endpoint uses bearer authentication. Compatible MCP clients can
-provide an Authorization header. `.mcp.json` references the caller's
-`RTT_MCP_API_KEY` environment variable; it contains no credential. Configure
-secrets in the client, never in this package or in chat. The default server
-configuration accepts the existing Action key; `MCP_API_KEY` can separate the
-inbound MCP credential from the upstream Action credential.
+The portable/local MCP configuration is deliberately credential-free:
 
-ChatGPT connects using OAuth at the same MCP URL. Discovery, dynamic client
-registration, S256 PKCE and exact ChatGPT callback matching are supported.
-Start account linking in ChatGPT, sign in to the existing mikegtn.net Admin
-account if necessary, then approve railway access. The scope is `rail:access`;
-this grants no website administration rights. The SDK validates clients and
-PKCE; the provider validates the resource on authorization and token exchange.
-Access tokens last one hour. Refresh tokens rotate and expire after 30 days of
-inactivity; replay revokes the token family. Codes and bearer tokens are hashed
-in the durable private database. `/revoke` revokes the entire token family.
-The owner bridge uses a separate host-generated key and loopback endpoints.
-Account installation must be verified separately from server tests. After
-registration, use the actual returned app ID; no fabricated ID is included here.
+```json
+{
+  "mcpServers": {
+    "realtime-trains": {
+      "type": "http",
+      "url": "https://rail.mikegtn.net/mcp"
+    }
+  }
+}
+```
 
-The live GPT editor was inspected on 19 September 2026. Its instructions match
-`references/gpt-instructions.md`; its Action uses the nine operations captured
-in `migration/action-openapi.json`. That schema is generated from the matching
-repository builder, not an exported browser file. The editor lists one knowledge
-attachment, `MOVEBOOK.md`, recovered from the owner's Downloads folder and
-preserved byte for byte in the skill's references. Its SHA-256 is
-`429e116b6fb27220901e20f480b14b158c59c7cca7e89db578a40e81a26d5e17`.
-The skill and both reference files are available through authenticated MCP
-resource reads. No migration option was visible in
-the GPT editor's menu. Web Search, Image Generation and Code Interpreter were
-disabled. The GPT was private (Only me).
+No RTT or server credential belongs in the plugin package, client configuration,
+chat, or browser. `ACTION_API_KEY` remains available only to the server-side
+sidecar so it can call the existing loopback Action API.
+
+The public endpoint has a process-level abuse ceiling in addition to the Action
+backend's own concurrency controls and the upstream RTT rate limits.
+
+## Skills
+
+The repository still contains the existing `realtime-trains` skill and preserved
+references for local/package testing. Version 0.1.0 of the public directory
+submission is intentionally **MCP-tools-only**. The public MCP endpoint therefore
+does not advertise the draft MCP Skills extension or expose skill resources for
+submission import.
+
+This keeps the first public release on stable MCP behaviour. A later release can
+add imported skills after the workflow and resource manifest are reviewed against
+the then-current Skills extension.
 
 ## Run and deploy
 
-From the repository, install the `mcp` extra and run
-`python -m rtt_app.mcp_server --transport http` (loopback port 8766) or use
-`--transport stdio`. `ACTION_API_KEY` and optionally `MCP_BACKEND_URL` configure
-the backend; production uses loopback HTTP, remote backends require HTTPS.
-No OpenAI API key is needed: this server provides tools, not model inference.
+Install the `mcp` extra and run:
 
-`deploy/update_mcp.sh COMMIT_SHA` installs a pinned release in a separate virtual
-environment, runs tests, backs up the Apache/service configuration, and adds
-the MCP and explicit OAuth routes ahead of the existing Action proxy, plus a
-small consent page under the existing website Admin path. It preserves the Action service,
-environment, maps and usage counters. It rolls back configuration and the
-consent page on failure. OAuth state and the bridge key survive updates.
-`OAUTH_DATABASE` and `OAUTH_BRIDGE_KEY_FILE` enable OAuth in the supplied service
-unit. Back up the private OAuth database securely; never include it in packages.
-Never run `deploy/install.sh` to add this adapter.
+```text
+python -m rtt_app.mcp_server --transport http
+```
 
-Run `python -m unittest discover -v` with the MCP extra installed. On the host,
-`deploy/verify_mcp.py --output /tmp/rtt-mcp-verification.json` checks real HTTPS
-MCP initialization, tools, resources, authentication and Aberdeen to Plymouth,
-including service details, location, route details, map and PNG snapshot. The
-output contains audit evidence but no credentials.
+The production sidecar listens on loopback port 8766. `ACTION_API_KEY` and
+optionally `MCP_BACKEND_URL` configure only the sidecar-to-Action hop. Remote
+backend URLs must use HTTPS.
+
+`deploy/update_mcp.sh COMMIT_SHA` installs a pinned release in an isolated
+virtual environment, runs the test suite, updates the systemd sidecar and Apache
+`/mcp` proxy, removes the retired public OAuth proxy routes and consent page, and
+runs the public MCP protocol verification. The old private OAuth database and key
+are deliberately left on disk during the transition so a rollback remains
+possible; they are no longer loaded by the service.
+
+`deploy/verify_mcp.py --output /tmp/rtt-mcp-verification.json` verifies the real
+HTTPS endpoint without credentials, confirms all tools publish `noauth`
+security metadata and output schemas, checks that request evidence is absent from
+public results, and exercises the Aberdeen-to-Plymouth service/location/map
+workflow.
+
+## Submission shape
+
+Version 0.1.0 is intended to be submitted as:
+
+- **With MCP**
+- Universal MCP URL: `https://rail.mikegtn.net/mcp`
+- Authentication: **None / public**
+- Custom UI: none
+- Imported MCP skills: none for the first release
+
+The listing should visibly attribute Realtime Trains as required by the applicable
+API terms and must not imply an official relationship beyond the permissions
+actually granted.
 
 ## Official implementation references
 
