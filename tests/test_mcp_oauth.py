@@ -75,6 +75,9 @@ class OAuthTests(unittest.TestCase):
         self.assertEqual(self.token(code).status_code, 400)
         catalog = self.rpc(token['access_token']).json()['result']['tools']
         self.assertEqual(len(catalog), 12)
+        for tool in catalog:
+            self.assertEqual(tool['securitySchemes'], [{'type': 'oauth2', 'scopes': ['rail:access']}])
+            self.assertEqual(tool['securitySchemes'], tool['_meta']['securitySchemes'])
         self.assertEqual(catalog[0]['_meta']['securitySchemes'][0]['scopes'], ['rail:access'])
         from rtt_app.mcp_oauth import OwnerOAuth
         reopened = OwnerOAuth(self.oauth.database, self.oauth.bridge_key)

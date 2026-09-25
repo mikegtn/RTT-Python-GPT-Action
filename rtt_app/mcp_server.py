@@ -76,7 +76,8 @@ def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False):
     @server.list_tools()
     async def list_tools():
         return [types.Tool(**{k: v for k, v in entry.items() if k != "path"},
-                           **({"_meta": {"securitySchemes": [{"type": "oauth2", "scopes": ["rail:access"]}]}}
+                           **({"securitySchemes": [{"type": "oauth2", "scopes": ["rail:access"]}],
+                               "_meta": {"securitySchemes": [{"type": "oauth2", "scopes": ["rail:access"]}]}}
                               if oauth_enabled else {}))
                 for entry in workflows.catalog.values()]
 

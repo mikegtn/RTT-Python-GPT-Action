@@ -31,10 +31,12 @@ non-destructive writes because they create persistent artifacts.
 
 ## Connection
 
-The remote endpoint uses bearer authentication. Compatible MCP clients can
-provide an Authorization header. `.mcp.json` references the caller's
-`RTT_MCP_API_KEY` environment variable; it contains no credential. Configure
-secrets in the client, never in this package or in chat. The default server
+The packaged `.mcp.json` uses OAuth discovery without a static Authorization
+header. ChatGPT registers its client dynamically; leave optional client ID and
+client secret fields empty when using dynamic registration. Each tool advertises
+`rail:access` in both `securitySchemes` and the compatibility `_meta` field.
+Compatible private MCP clients can still provide an Authorization bearer header.
+Configure secrets in the client, never in this package or in chat. The default server
 configuration accepts the existing Action key; `MCP_API_KEY` can separate the
 inbound MCP credential from the upstream Action credential.
 
