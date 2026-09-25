@@ -50,7 +50,7 @@ class DirectBackend:
 
 def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False, progress_images=None):
     workflows = RailWorkflows(backend, progress_images)
-    server = Server("realtime-trains", version="0.1.0", instructions=(
+    server = Server("trainbrain", version="0.1.0", instructions=(
         "Use RTT tools for railway service facts. Preserve exact uniqueIdentity and requestEvidence. "
         "Read the realtime-trains skill resource. Find dated services before mapping an itinerary. "
         "Snapshots only on request. A last location report is not GPS. Journey searches are bounded; "
@@ -87,7 +87,7 @@ def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False, progres
         return types.CallToolResult(content=content,
                                     structuredContent=body, isError=not body.get("ok", False))
 
-    resources = {SKILL_URI: ("Realtime Trains behaviour", "SKILL.md"),
+    resources = {SKILL_URI: ("TrainBrain railway assistant", "SKILL.md"),
                  "skill://realtime-trains/realtime-trains/references/MOVEBOOK.md":
                      ("Original MOVEBOOK knowledge", "references/MOVEBOOK.md"),
                  "skill://realtime-trains/realtime-trains/references/gpt-instructions.md":

@@ -1,6 +1,6 @@
-# Realtime Trains plugin migration
+# TrainBrain
 
-This package preserves the Realtime Trains Assistant behaviour and exposes fourteen
+TrainBrain uses Realtime Trains data, preserves the original railway assistant behaviour and exposes fourteen
 MCP tools through `https://rail.mikegtn.net/mcp`. It is a private, authenticated
 integration. The original GPT Action continues to run independently.
 
@@ -148,3 +148,7 @@ output contains audit evidence but no credentials.
 - [Authentication](https://developers.openai.com/plugins/build/auth)
 - [Package a plugin](https://developers.openai.com/plugins/build/plugins)
 - [Connect and test](https://developers.openai.com/plugins/deploy/connect-chatgpt)
+
+The display name is TrainBrain. Existing package IDs and skill resource URIs retain
+`realtime-trains` for connection compatibility. Realtime Trains remains the data
+provider attribution, rather than the name of this independent assistant.

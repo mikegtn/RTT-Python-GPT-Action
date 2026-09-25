@@ -77,9 +77,9 @@ if (!is_string($flow) || !preg_match('/\A[A-Za-z0-9_-]{43}\z/', $flow)) {
 }
 ?><!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect Realtime Trains</title>
+<title>Connect TrainBrain</title>
 <style>body{font:18px/1.6 system-ui,sans-serif;background:#f1f6f5;color:#173c39;margin:0;padding:4vh 20px}main{max-width:620px;margin:auto;background:white;padding:32px;border-radius:16px}h1{line-height:1.2}button,.button{font:inherit;padding:12px 20px;background:#176b62;color:white;border:0;border-radius:7px;display:inline-block;cursor:pointer}button:focus,a:focus{outline:3px solid #eea936;outline-offset:3px}.secondary{background:#e4eeeb;color:#173c39}form{display:flex;gap:12px;flex-wrap:wrap}.error{color:#9b2727}small{display:block;margin-top:20px;color:#516661}</style>
-<main><h1>Connect Realtime Trains to ChatGPT</h1>
+<main><h1>Connect TrainBrain to ChatGPT</h1>
 <?php if ($error !== ''): ?>
 <p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
 <p><a href="?request=<?= rawurlencode(is_string($flow) ? $flow : '') ?>">Open consent form again</a></p>
@@ -88,7 +88,7 @@ if (!is_string($flow) || !preg_match('/\A[A-Za-z0-9_-]{43}\z/', $flow)) {
 <p><a class="button" href="/admin/" target="_blank" rel="noopener noreferrer">Sign in to Admin</a></p>
 <p><a href="?request=<?= rawurlencode($flow) ?>">I’m signed in — continue</a></p>
 <?php else: ?>
-<p>Allow ChatGPT to use your Realtime Trains integration for service searches, journey details, train reports, route maps and snapshots.</p>
+<p>Allow ChatGPT to use TrainBrain for service searches, journey details, train reports, route maps and snapshots.</p>
 <p>This grants access only to the railway tools. Your website stories, Admin controls and password are not shared.</p>
 <p>Connection: <strong><?= htmlspecialchars((string) $pending['clientName'], ENT_QUOTES, 'UTF-8') ?></strong></p>
 <form method="post" action="?request=<?= rawurlencode($flow) ?>">

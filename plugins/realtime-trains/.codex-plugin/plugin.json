@@ -7,13 +7,13 @@
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Realtime Trains",
+    "displayName": "TrainBrain",
     "shortDescription": "UK rail services, journeys and maps.",
-    "longDescription": "Search dated RTT services, inspect train details and last reports, compare bounded journey options, and generate verified itinerary maps.",
+    "longDescription": "TrainBrain uses Realtime Trains data to search dated services, inspect train details and last reports, compare journey options, and generate route maps and progress schematics.",
     "developerName": "Mike Newman",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Help me use Realtime Trains.",
+    "defaultPrompt": "Help me plan and follow a train journey with TrainBrain.",
     "websiteURL": "https://rail.mikegtn.net",
     "privacyPolicyURL": "https://rail.mikegtn.net/privacy",
     "brandColor": "#157F82"

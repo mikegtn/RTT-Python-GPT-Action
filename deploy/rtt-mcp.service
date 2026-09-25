@@ -1,5 +1,5 @@
 [Unit]
-Description=Realtime Trains MCP adapter
+Description=TrainBrain MCP server
 After=network-online.target
 Wants=network-online.target
 

@@ -328,6 +328,6 @@ client; GPT instructions request Markdown images beside coach letters.
 
 The authenticated MCP adapter calls shared railway operations directly. The existing
 GPT Action retains its HTTP interface and runs independently.
-See [the Realtime Trains plugin](plugins/realtime-trains/README.md) for its fourteen
+See [the TrainBrain plugin](plugins/realtime-trains/README.md) for its fourteen
 tools, preserved instructions, deployment, verification, and remaining ChatGPT
 OAuth/knowledge-file migration gates. Install with `pip install '.[mcp]'`.

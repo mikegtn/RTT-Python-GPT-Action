@@ -183,7 +183,7 @@ class TransportTests(unittest.TestCase):
         response = self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                           "clientInfo": {"name": "test", "version": "1"}})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["result"]["serverInfo"]["name"], "realtime-trains")
+        self.assertEqual(response.json()["result"]["serverInfo"]["name"], "trainbrain")
         catalog = self.rpc("tools/list").json()["result"]["tools"]
         self.assertEqual(len(catalog), 14)
         by_name = {t["name"]: t for t in catalog}

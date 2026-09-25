@@ -73,6 +73,18 @@ install -m 0644 "$release/deploy/rtt-mcp.service" /etc/systemd/system/rtt-mcp.se
 if ! test -f "$bridge"; then
     install -o root -g www-data -m 0644 "$release/deploy/rtt-oauth.php" "$bridge"
 fi
+# Update only branding in the site-owned bridge; preserve all other website code.
+python3 - "$bridge" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+updated = text.replace('Connect Realtime Trains', 'Connect TrainBrain').replace(
+    'your Realtime Trains integration', 'TrainBrain')
+if updated != text:
+    path.write_text(updated)
+PY
+php -l "$bridge"
 python3 - "$config" <<'PY'
 from pathlib import Path
 import sys

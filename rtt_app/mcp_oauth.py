@@ -256,7 +256,7 @@ class OwnerOAuth:
         async def resource_metadata(request):
             return JSONResponse({"resource": RESOURCE, "authorization_servers": [ISSUER],
                                  "scopes_supported": [SCOPE], "bearer_methods_supported": ["header"],
-                                 "resource_name": "Realtime Trains"})
+                                 "resource_name": "TrainBrain"})
 
         async def metadata(request):
             return JSONResponse({"issuer": ISSUER, "authorization_endpoint": ISSUER + "/authorize",
