@@ -106,7 +106,7 @@ def render(service, progress):
         text(51, 219, 'Not started in the available reports. Missing reports do not prove no movement.', 20, width=1000)
     text(133, 315, 'PASSENGER STOPS · SERVICE ORDER', 16, MUTED, True)
     text(700, 315, 'BOOKED', 16, MUTED, True)
-    text(870, 315, 'ACTUAL BY CUTOFF', 16, MUTED, True)
+    text(870, 315, 'ACTUAL', 16, MUTED, True)
     ys = {i: 368 + row * 48 for row, (i, _) in enumerate(calls)}
     x = 84
     draw.line((x, min(ys.values()), x, max(ys.values())), fill='#b6c9cf', width=6)
