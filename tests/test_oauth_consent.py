@@ -93,10 +93,13 @@ $_SESSION['admin_authenticated'] = true; echo 'test login';
     def test_allow_and_deny_with_serialized_form_fields(self):
         for decision, result in [('allow', 'code=test-only'), ('deny', 'error=access_denied')]:
             fields = self.form(decision)
-            status, headers, _ = self.request(self.path, fields)
-            self.assertEqual(status, 303)
-            self.assertTrue(headers['Location'].endswith(result))
-            self.assertIn("form-action 'self' https://chatgpt.com", headers['Content-Security-Policy'])
+            status, headers, body = self.request(self.path, fields)
+            self.assertEqual(status, 200)
+            self.assertNotIn('Location', headers)
+            self.assertIn('http-equiv="refresh"', body)
+            self.assertIn('https://chatgpt.com/connector/oauth/test?' + result, body)
+            self.assertIn('Continue to ChatGPT', body)
+            self.assertIn("form-action 'self';", headers['Content-Security-Policy'])
 
     def test_csrf_and_missing_decision_fail_closed(self):
         fields = self.form('allow')

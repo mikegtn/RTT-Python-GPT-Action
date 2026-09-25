@@ -10,7 +10,7 @@ $crossSiteArrival = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
 if (!$crossSiteArrival) { admin_start_session(); }
 header('Cache-Control: no-store');
 header('Referrer-Policy: no-referrer');
-header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'; base-uri 'none'");
+header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 
@@ -56,7 +56,17 @@ if (!is_string($flow) || !preg_match('/\A[A-Za-z0-9_-]{43}\z/', $flow)) {
                 throw new RuntimeException('Invalid return address.');
             }
             unset($_SESSION['rtt_oauth_csrf']);
-            header('Location: ' . $redirect, true, 303);
+            // The site's Apache CSP also enforces form-action 'self'. A 303
+            // to ChatGPT remains part of the form submission and is blocked.
+            // Finish the POST here, then navigate from the returned document.
+            session_write_close();
+            $escapedRedirect = htmlspecialchars($redirect, ENT_QUOTES, 'UTF-8');
+            echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                . '<meta name="referrer" content="no-referrer">'
+                . '<meta http-equiv="refresh" content="0;url=' . $escapedRedirect . '">'
+                . '<title>Returning to ChatGPT</title></head><body>'
+                . '<h1>Returning to ChatGPT</h1><p>Your decision has been recorded.</p>'
+                . '<p><a href="' . $escapedRedirect . '">Continue to ChatGPT</a></p></body></html>';
             exit;
         }
         $pending = rtt_owner_call('lookup', ['request' => $flow]);
