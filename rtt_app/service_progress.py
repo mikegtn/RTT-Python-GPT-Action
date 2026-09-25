@@ -44,7 +44,7 @@ def service_progress(service, identity, as_of=None):
 
     def point(index):
         call = calls[index]
-        result = {"name": (call.get("location") or {}).get("description"),
+        result = {"callIndex": index, "name": (call.get("location") or {}).get("description"),
                   "location": call.get("location")}
         for event in ("arrival", "departure"):
             timing = (call.get("temporalData") or {}).get(event) or {}
@@ -67,7 +67,7 @@ def service_progress(service, identity, as_of=None):
         return result
     latest = events[-1]
     instant, index, _, event, timing = latest
-    result["lastReport"] = {"location": calls[index].get("location"), "event": event,
+    result["lastReport"] = {"callIndex": index, "location": calls[index].get("location"), "event": event,
                             "reportedAt": timing["realtimeActual"]}
     result["reportAgeSeconds"] = max(0, int((cutoff - instant).total_seconds()))
     result["latenessMinutes"] = timing.get("realtimeAdvertisedLateness")

@@ -24,6 +24,18 @@ Additional tools:
   Historical replay uses today's retrieved record, not historical receipt times
   or former timetable/cancellation revisions. Run the live regression with
   `python deploy/verify_mcp.py --service-progress --output progress.json`.
+  Set `include_image=true` on explicit request to return an inline MCP PNG and
+  `imageUrl` for a schematic of all passenger stops. The highlighted station or
+  segment comes from the same progress record; the train symbol never indicates
+  distance along the line. Future actuals are hidden at historical cutoffs.
+  Cancelled stops remain labelled in service order. Repeated locations use exact
+  call indices. `imageError` preserves the progress result if rendering fails.
+  The optional Pillow extra is required; set `MCP_PROGRESS_IMAGE_DIR` to a writable
+  persistent directory (configured by the MCP service unit). Completed PNGs are
+  public at unguessable `/mcp/progress/<id>.png` URLs; generation requires MCP
+  authentication. Storage retains up to 512 images for at most seven days.
+  Add `--progress-image` to the regression command to verify all four images,
+  compare native image bytes with unauthenticated public downloads, and save PNGs.
 
 - `findJourneys`: direct trains and up to three changes among three caller-supplied
   candidate interchange stations, explored in any order. `max_changes` can limit

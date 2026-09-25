@@ -6,6 +6,7 @@ returned unchanged. No upstream credentials are exposed to a model.
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import secrets
@@ -59,6 +60,8 @@ def tool_catalog():
          "Optional as_of replays event times from today's service record, not what was known historically. "
          "Reports are not GPS; missing or contradictory evidence returns an error rather than a guessed state.",
          object_schema({"unique_identity": IDENTITY,
+                        "include_image": {"type": "boolean", "default": False,
+                                          "description": "On explicit request, create a passenger-stop PNG schematic and return a public image URL. Segment marker is symbolic, not GPS or distance along the line."},
                         "as_of": {"type": "string", "format": "date-time",
                                   "description": "Optional ISO datetime with explicit UTC offset; inclusive event cutoff."}},
                        ["unique_identity"])),
@@ -92,6 +95,7 @@ def tool_catalog():
                                           "properties": {"ok": {"type": "boolean"}}, "additionalProperties": True},
                          "annotations": {"readOnlyHint": True, "destructiveHint": False,
                                          "idempotentHint": True, "openWorldHint": True}}
+    catalog["getServiceProgress"]["annotations"].update(readOnlyHint=False, idempotentHint=False)
     return catalog
 
 
@@ -156,8 +160,9 @@ def passenger_leg(service, identity, origin, destination):
 
 
 class RailWorkflows:
-    def __init__(self, backend):
+    def __init__(self, backend, progress_images=None):
         self.backend = backend
+        self.progress_images = progress_images
         self.catalog = tool_catalog()
 
     async def call(self, name: str, arguments: dict[str, Any]):
@@ -194,6 +199,14 @@ class RailWorkflows:
                 elif name == "getServiceProgress":
                     from .service_progress import service_progress
                     result = service_progress(service, identity, arguments.get("as_of"))
+                    if arguments.get("include_image"):
+                        if self.progress_images is None:
+                            result["imageError"] = "Service schematic images are not configured on this server"
+                        else:
+                            try:
+                                result.update(await asyncio.to_thread(self.progress_images.create, service, result))
+                            except (OSError, ValueError, ImportError):
+                                result["imageError"] = "Service schematic image could not be generated; progress evidence remains available"
                 else:
                     now = datetime.now(timezone.utc)
                     reports = []

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 import json
 import logging
@@ -21,7 +22,7 @@ from mcp.server.stdio import stdio_server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from .cli import load_dotenv
@@ -64,8 +65,8 @@ class ActionBackend:
             return {"ok": False, "error": "RTT backend unavailable or returned invalid JSON"}
 
 
-def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False):
-    workflows = RailWorkflows(backend)
+def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False, progress_images=None):
+    workflows = RailWorkflows(backend, progress_images)
     server = Server("realtime-trains", version="0.1.0", instructions=(
         "Use RTT tools for railway service facts. Preserve exact uniqueIdentity and requestEvidence. "
         "Read the realtime-trains skill resource. Find dated services before mapping an itinerary. "
@@ -94,7 +95,13 @@ def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False):
         evidence = body.get("requestEvidence")
         if evidence:
             LOG.info(json.dumps({**evidence, "ok": body.get("ok"), "transport": "mcp"}))
-        return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(body, ensure_ascii=False))],
+        content = [types.TextContent(type="text", text=json.dumps(body, ensure_ascii=False))]
+        image_id = (body.get("result") or {}).get("schematicId")
+        if progress_images is not None and image_id:
+            png = await asyncio.to_thread(progress_images.read, image_id)
+            if png:
+                content.append(types.ImageContent(type="image", mimeType="image/png", data=base64.b64encode(png).decode('ascii')))
+        return types.CallToolResult(content=content,
                                     structuredContent=body, isError=not body.get("ok", False))
 
     resources = {SKILL_URI: ("Realtime Trains behaviour", "SKILL.md"),
@@ -117,7 +124,7 @@ def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False):
     return server
 
 
-def create_http_app(server, key, oauth=None):
+def create_http_app(server, key, oauth=None, progress_images=None):
     if not key:
         raise ValueError("MCP bearer key is required")
     manager = StreamableHTTPSessionManager(server, json_response=True, stateless=True,
@@ -150,7 +157,15 @@ def create_http_app(server, key, oauth=None):
     async def health(request):
         return JSONResponse({"ok": True, "service": "rtt-mcp", "authentication": "oauth2" if oauth else "bearer"})
 
+    async def progress_image(request):
+        png = await asyncio.to_thread(progress_images.read, request.path_params['image_id']) if progress_images else None
+        if png is None:
+            return Response(status_code=404)
+        return Response(png, media_type='image/png', headers={
+            'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff'})
+
     return Starlette(routes=[Route("/mcp", Endpoint(), methods=["GET", "POST", "DELETE"]),
+                             Route("/mcp/progress/{image_id}.png", progress_image, methods=["GET"]),
                              Route("/health", health)] + (oauth.routes() if oauth else []), lifespan=lifespan)
 
 
@@ -168,13 +183,17 @@ def main():
         from .mcp_oauth import OwnerOAuth
         oauth = OwnerOAuth(os.environ["OAUTH_DATABASE"],
                            Path(os.environ["OAUTH_BRIDGE_KEY_FILE"]).read_text().strip())
-    server = create_server(backend, oauth_enabled=oauth is not None)
+    progress_images = None
+    if os.environ.get('MCP_PROGRESS_IMAGE_DIR'):
+        from .progress_image import ProgressImages
+        progress_images = ProgressImages(os.environ['MCP_PROGRESS_IMAGE_DIR'])
+    server = create_server(backend, oauth_enabled=oauth is not None, progress_images=progress_images)
     logging.basicConfig(level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     if args.transport == "http":
         import uvicorn
-        uvicorn.run(create_http_app(server, os.environ.get("MCP_API_KEY", key), oauth),
+        uvicorn.run(create_http_app(server, os.environ.get("MCP_API_KEY", key), oauth, progress_images),
                     host=args.host, port=args.port, access_log=False)
     else:
         async def run():

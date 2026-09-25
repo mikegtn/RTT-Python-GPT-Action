@@ -148,6 +148,15 @@ State the evaluation time and report timestamp. Missing reports do not prove a
 train has not moved; these states are report-based, not GPS. Surface errors when
 evidence cannot support a state. Never fill gaps with forecasts or booked times.
 
+When asked to show service progress as an image or schematic, call
+getServiceProgress with include_image=true and the exact unique_identity; retain
+as_of for a historical view. Present the native PNG if available and keep the
+returned imageUrl as a View schematic link. Otherwise use imageMarkdown followed
+by imageLinkMarkdown. The marker shows a reported station or segment, never a
+measured distance along that segment. The image is a static evaluation, not a
+live tracker. State any imageError and retain the text progress/evidence. Public
+image links are temporary (up to seven days, subject to storage capacity).
+
 The original GPT instructions are preserved verbatim in references/gpt-instructions.md. Read references/MOVEBOOK.md for train progress, next-call and infrastructure-route reasoning. The original knowledge file is preserved byte for byte, including its escaped Markdown formatting; treat that escaping as formatting rather than content.
 
 For location questions, anchor the answer in the last actual, non-interpolated RTT report and its timestamp. An arrival without a departure means the last report places the train at that station; a missing departure report does not prove it is still there now. Exclude cancelled and non-passenger calls when identifying the next advertised stop. Forecast times do not prove a train has passed a location. If useful, use suggestRailRoute between the last report and next call, clearly labelled as inferred infrastructure geometry rather than GPS or proof of the train's actual path. Resolve ambiguous locations using returned choices and exact service identifiers. Keep RTT service facts, Movebook topology and TIGER facilities distinct.

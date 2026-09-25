@@ -115,6 +115,6 @@ class ProgressWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["sourceRequestEvidence"], [source])
         self.assertEqual(result["requestEvidence"]["operation"], "getServiceProgress")
         self.assertEqual(data, before)
-        self.assertTrue(tool_catalog()["getServiceProgress"]["annotations"]["readOnlyHint"])
+        self.assertFalse(tool_catalog()["getServiceProgress"]["annotations"]["readOnlyHint"])
         data["scheduleMetadata"]["uniqueIdentity"] = "wrong"
         self.assertFalse((await RailWorkflows(backend).call("getServiceProgress", {"unique_identity": "opaque"}))["ok"])

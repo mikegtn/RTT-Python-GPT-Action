@@ -1,6 +1,8 @@
 """Verify production MCP via the official SDK. Credentials stay on the server."""
 import argparse
 import asyncio
+import base64
+import hashlib
 from datetime import date, datetime, time
 import json
 from pathlib import Path
@@ -45,6 +47,23 @@ async def verify(args, key=None):
                         Path(args.output).write_text(json.dumps(report, indent=2), encoding='utf-8')
                     assert not result.isError, f'{name} failed: {data}'
                     assert data and data.get('requestEvidence'), f'{name} missing evidence'
+                    if parameters.get('include_image'):
+                        value = data['result']
+                        assert 'imageError' not in value, value
+                        native = [c for c in result.content if c.type == 'image']
+                        assert len(native) == 1 and native[0].mimeType == 'image/png'
+                        png = base64.b64decode(native[0].data, validate=True)
+                        assert png.startswith(b'\x89PNG\r\n\x1a\n')
+                        async with httpx.AsyncClient(timeout=30, trust_env=False) as public:
+                            fetched = await public.get(value['imageUrl'])
+                        assert fetched.status_code == 200 and fetched.headers['content-type'].startswith('image/png')
+                        assert fetched.content == png
+                        report['calls'][-1]['imageVerification'] = {'publicStatus': fetched.status_code,
+                            'nativeImageMatchesPublic': True, 'sha256': hashlib.sha256(png).hexdigest(), 'bytes': len(png)}
+                        if args.output:
+                            target = Path(args.output).with_name(Path(args.output).stem + '-' + value['state'] + '.png')
+                            target.write_bytes(png)
+                            Path(args.output).write_text(json.dumps(report, indent=2), encoding='utf-8')
                     print(json.dumps({'tool': name, 'evidence': data['requestEvidence']}), flush=True)
                     return data['result']
                 if getattr(args, 'service_progress', False):
@@ -54,7 +73,8 @@ async def verify(args, key=None):
                     for clock, state in [('14:00:00', 'not_started'), ('20:30:00', 'at_station'),
                                          ('20:35:00', 'between_calls'), ('22:00:00', 'completed')]:
                         progress = await call('getServiceProgress', {
-                            'unique_identity': identity, 'as_of': '2026-09-19T' + clock + '+01:00'})
+                            'unique_identity': identity, 'as_of': '2026-09-19T' + clock + '+01:00',
+                            'include_image': getattr(args, 'progress_image', False)})
                         assert progress['state'] == state, progress
                         assert progress['uniqueIdentity'] == identity
                         assert report['calls'][-1]['response']['sourceRequestEvidence']
@@ -106,6 +126,7 @@ def main():
     parser.add_argument('--protocol-only', action='store_true')
     parser.add_argument('--multi-interchange', action='store_true')
     parser.add_argument('--service-progress', action='store_true')
+    parser.add_argument('--progress-image', action='store_true', help='With --service-progress, verify native and public PNGs for all four states')
     parser.add_argument('--date', default='2026-09-19')
     parser.add_argument('--output')
     args = parser.parse_args()

@@ -13,6 +13,7 @@ EnvironmentFile=/etc/rtt-action.env
 Environment=MCP_BACKEND_URL=http://127.0.0.1:8765
 Environment=OAUTH_DATABASE=/var/lib/rtt-mcp/oauth.sqlite3
 Environment=OAUTH_BRIDGE_KEY_FILE=/etc/rtt-oauth-bridge.key
+Environment=MCP_PROGRESS_IMAGE_DIR=/var/lib/rtt-mcp/progress-images
 StateDirectory=rtt-mcp
 StateDirectoryMode=0700
 UMask=0077
