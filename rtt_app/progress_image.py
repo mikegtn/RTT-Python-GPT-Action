@@ -14,12 +14,28 @@ TTL = 7 * 24 * 3600
 MAX_IMAGES = 512
 WIDTH = 1120
 TEAL = '#087f82'
+RED = '#c3343b'
 INK = '#19333e'
 MUTED = '#536875'
 
 
+def observed(call, event, cutoff):
+    temporal = call.get('temporalData') or {}
+    timing = temporal.get(event) or {}
+    actual = timing.get('realtimeActual')
+    return timing if (actual and temporal.get('isInterpolated') is not True
+                      and timing.get('isCancelled') is not True and timestamp(actual) <= cutoff) else None
+
+
+def timing_color(timing):
+    if not timing or not timing.get('scheduleAdvertised'):
+        return MUTED
+    delay = timestamp(timing['realtimeActual']) - timestamp(timing['scheduleAdvertised'])
+    return RED if delay.total_seconds() > 60 else TEAL
+
+
 def render(service, progress):
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
     calls = [(i, c) for i, c in enumerate(service.get('calls') or [])
              if ((c.get('temporalData') or {}).get('scheduledCallType') in PASSENGER_TYPES
@@ -38,7 +54,7 @@ def render(service, progress):
                 pass
         return ImageFont.load_default(size=size)
 
-    image = Image.new('RGB', (WIDTH, 366 + len(calls) * 48 + 174), '#f5f8fa')
+    image = Image.new('RGB', (WIDTH, 366 + len(calls) * 48 + 206), '#f5f8fa')
     draw = ImageDraw.Draw(image)
 
     def text(x, y, value, size=22, color=INK, bold=False, width=None):
@@ -75,9 +91,13 @@ def render(service, progress):
     draw.rounded_rectangle((30, 153, 1090, 291), radius=16, fill='#e2f2f1')
     text(51, 171, headline, 29, TEAL, True, 1010)
     report = progress.get('lastReport')
+    current_color = TEAL
+    if report:
+        reported_call = service['calls'][report['callIndex']]
+        current_color = timing_color(observed(reported_call, report['event'], cutoff))
     if report:
         detail = f"Last report: {report['location']['description']} · {report['event']} {clock(report['reportedAt'])}"
-        text(51, 217, detail, 21, width=1000)
+        text(51, 217, detail, 21, color=current_color, width=1000)
         late = progress.get('latenessMinutes')
         lateness = ('Lateness unavailable' if late is None else
                     'On time' if late == 0 else f'{abs(late):g} min ' + ('late' if late > 0 else 'early'))
@@ -90,13 +110,18 @@ def render(service, progress):
     ys = {i: 368 + row * 48 for row, (i, _) in enumerate(calls)}
     x = 84
     draw.line((x, min(ys.values()), x, max(ys.values())), fill='#b6c9cf', width=6)
+    # A section is completed only when an actual report exists at its far end.
+    # Prefer arrival timing; departure is a fallback when the arrival is absent.
+    for (start, _), (end, call) in zip(calls, calls[1:]):
+        timing = observed(call, 'arrival', cutoff) or observed(call, 'departure', cutoff)
+        if timing:
+            draw.line((x, ys[start], x, ys[end]), fill=timing_color(timing), width=8)
     selected = []
     marker_y = None
     if state == 'between_calls':
         selected = [progress['from']['callIndex'], progress['to']['callIndex']]
         if not all(i in ys for i in selected):
             raise ValueError('Progress endpoints are absent from the schematic')
-        draw.line((x, ys[selected[0]], x, ys[selected[1]]), fill=TEAL, width=12)
         marker_y = (ys[selected[0]] + ys[selected[1]]) // 2
     elif state in {'at_station', 'completed'}:
         selected = [progress['at']['callIndex']]
@@ -107,6 +132,19 @@ def render(service, progress):
         # Hollow endpoint marker denotes no actual report, never a located train.
         draw.ellipse((x-17, min(ys.values())-17, x+17, min(ys.values())+17), outline=TEAL, width=3)
 
+    if state in {'between_calls', 'at_station'}:
+        glow = Image.new('RGBA', image.size, (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow)
+        rgb = tuple(int(current_color[i:i+2], 16) for i in (1, 3, 5))
+        if state == 'between_calls':
+            glow_draw.line((x, ys[selected[0]], x, ys[selected[1]]), fill=(*rgb, 125), width=28)
+        else:
+            glow_draw.ellipse((x-20, marker_y-20, x+20, marker_y+20), fill=(*rgb, 125))
+        image = Image.alpha_composite(image.convert('RGBA'), glow.filter(ImageFilter.GaussianBlur(8))).convert('RGB')
+        draw = ImageDraw.Draw(image)
+        if state == 'between_calls':
+            draw.line((x, ys[selected[0]], x, ys[selected[1]]), fill=current_color, width=12)
+
     for index, call in calls:
         y = ys[index]
         active = index in selected
@@ -114,7 +152,7 @@ def render(service, progress):
         cancelled = not passenger_call(call)
         if active:
             draw.rounded_rectangle((117, y-20, 1076, y+23), radius=8, fill='#e2f2f1')
-        draw.ellipse((x-8, y-8, x+8, y+8), fill=TEAL if active else '#ffffff', outline=TEAL if active else '#829ba6', width=3)
+        draw.ellipse((x-8, y-8, x+8, y+8), fill=current_color if active else '#ffffff', outline=current_color if active else '#829ba6', width=3)
         name = (call.get('location') or {}).get('description') or 'Unnamed stop'
         if cancelled:
             name += ' · cancelled / not calling'
@@ -134,13 +172,14 @@ def render(service, progress):
         booked = ('Arr ' if event == 'arrival' else 'Dep ') + clock(scheduled)[:5] if scheduled else '—'
         text(700, y-12, booked, 18, MUTED, width=150)
         label = ('Arr ' if latest[1] == 'arrival' else 'Dep ') + clock(latest[2]) if latest else '—'
-        text(870, y-12, label, 18, TEAL if active else MUTED, width=195)
+        actual_color = timing_color(observed(call, latest[1], cutoff)) if latest else MUTED
+        text(870, y-12, label, 18, actual_color, width=195)
 
     if marker_y is not None:
         # A small train glyph outside the line, linked to the highlighted segment.
         # Its position within that segment is purely symbolic.
-        draw.line((42, marker_y, 72, marker_y), fill=TEAL, width=3)
-        draw.rounded_rectangle((20, marker_y-17, 48, marker_y+17), radius=6, fill=TEAL)
+        draw.line((42, marker_y, 72, marker_y), fill=current_color, width=3)
+        draw.rounded_rectangle((20, marker_y-17, 48, marker_y+17), radius=6, fill=current_color)
         draw.rectangle((25, marker_y-10, 43, marker_y-1), fill='white')
         for cx in (27, 41):
             draw.ellipse((cx-2, marker_y+8, cx+2, marker_y+12), fill='white')
@@ -149,7 +188,8 @@ def render(service, progress):
     text(42, footer+17, 'RTT actual movement reports; not GPS', 20, INK, True)
     text(42, footer+49, 'Schematic, not to scale. Train symbol identifies a station or segment, not distance travelled.', 18, MUTED, width=1032)
     text(42, footer+77, 'Missing reports do not prove current position. Historical replay uses the record retrieved today.', 18, MUTED, width=1032)
-    text(42, footer+109, progress['uniqueIdentity'], 16, MUTED, width=1032)
+    text(42, footer+109, 'Red: over 1 min late · Teal: within 1 min / early · Glow: current report · Grey: unknown / ahead', 17, MUTED, width=1032)
+    text(42, footer+139, progress['uniqueIdentity'], 16, MUTED, width=1032)
     output = BytesIO()
     image.save(output, format='PNG')
     return output.getvalue(), image.size, headline

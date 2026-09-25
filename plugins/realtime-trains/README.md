@@ -29,7 +29,12 @@ Additional tools:
   segment comes from the same progress record; the train symbol never indicates
   distance along the line. Future actuals are hidden at historical cutoffs.
   Cancelled stops remain labelled in service order. Repeated locations use exact
-  call indices. `imageError` preserves the progress result if rendering fails.
+  call indices. Actual times more than 60 seconds after the matching advertised
+  time are red; within tolerance or early reports are teal. Completed segments use
+  the far-end actual arrival (departure fallback); future/unknown segments remain
+  grey. The current reported segment or station has a soft glow in its timing
+  colour. No forecast is used to colour a completed section.
+  `imageError` preserves the progress result if rendering fails.
   The optional Pillow extra is required; set `MCP_PROGRESS_IMAGE_DIR` to a writable
   persistent directory (configured by the MCP service unit). Completed PNGs are
   public at unguessable `/mcp/progress/<id>.png` URLs; generation requires MCP

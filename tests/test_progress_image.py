@@ -10,13 +10,37 @@ import unittest
 from unittest.mock import patch
 
 from rtt_app.mcp_tools import RailWorkflows
-from rtt_app.progress_image import ProgressImages, render, TTL
+from rtt_app.progress_image import ProgressImages, render, TTL, timing_color, RED, TEAL, MUTED
 from rtt_app.service_progress import service_progress
 from tests.test_service_progress import fixture
 
 
 @unittest.skipUnless(importlib.util.find_spec('PIL'), 'Install snapshots extra')
 class ImageTests(unittest.TestCase):
+    def test_exact_minute_threshold_and_unknown_booked_time(self):
+        timing = {'scheduleAdvertised': '2026-09-19T20:00:00+01:00'}
+        for actual, expected in [('19:59:00', TEAL), ('20:01:00', TEAL), ('20:01:01', RED)]:
+            timing['realtimeActual'] = '2026-09-19T' + actual + '+01:00'
+            self.assertEqual(timing_color(timing), expected)
+        timing['realtimeActual'] = '2026-09-19T19:01:00Z'
+        self.assertEqual(timing_color(timing), TEAL)
+        self.assertEqual(timing_color({'realtimeActual': timing['realtimeActual']}), MUTED)
+
+    def test_completed_segment_uses_arrival_and_current_segment_glows(self):
+        from PIL import Image, ImageColor
+        data = fixture()
+        # Arrival just within the tolerance, departure late: completed inbound
+        # section stays teal while the currently occupied outbound section is red.
+        data['calls'][1]['temporalData']['arrival']['scheduleAdvertised'] = '2026-09-19T20:41:00'
+        png = render(data, self.progress(data, '20:44:00'))[0]
+        with Image.open(BytesIO(png)) as image:
+            self.assertEqual(image.getpixel((84, 392)), ImageColor.getrgb(TEAL))
+            self.assertEqual(image.getpixel((84, 440)), ImageColor.getrgb(RED))
+            self.assertNotEqual(image.getpixel((101, 440)), ImageColor.getrgb('#f5f8fa'))
+        data['calls'][1]['temporalData']['arrival']['scheduleAdvertised'] = '2026-09-19T20:40:00'
+        with Image.open(BytesIO(render(data, self.progress(data, '20:44:00'))[0])) as image:
+            self.assertEqual(image.getpixel((84, 392)), ImageColor.getrgb(RED))
+
     def progress(self, data=None, clock='20:35:00'):
         return service_progress(data or fixture(), 'opaque', '2026-09-19T' + clock + '+01:00')
 
