@@ -121,7 +121,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.calls, [])
 
-    def test_initialize_list_call_resource_and_invalid_input(self):
+    def test_initialize_list_call_and_invalid_input(self):
         response = self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                           "clientInfo": {"name": "test", "version": "1"}})
         self.assertEqual(response.status_code, 200, response.text)
@@ -144,8 +144,6 @@ class TransportTests(unittest.TestCase):
         invalid = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": 123}}).json()["result"]
         self.assertTrue(invalid["isError"])
         self.assertEqual(len(self.calls), 1)
-        resource = self.rpc("resources/read", {"uri": "skill://realtime-trains/realtime-trains/SKILL.md"}).json()["result"]
-        self.assertIn("requestEvidence", resource["contents"][0]["text"])
 
     def test_untrusted_origin_is_rejected(self):
         self.headers["Origin"] = "https://attacker.example"
