@@ -1,4 +1,4 @@
-"""Authenticated Streamable HTTP / stdio MCP adapter for the RTT Action.
+"""Authenticated Streamable HTTP / stdio MCP adapter for shared railway operations.
 
 HTTP accepts scoped owner-approved OAuth tokens and the existing private API key.
 """
@@ -13,9 +13,7 @@ import logging
 import os
 from pathlib import Path
 import secrets
-from urllib.parse import urlsplit
 
-import httpx
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
@@ -27,42 +25,27 @@ from starlette.routing import Route
 
 from .cli import load_dotenv
 from .mcp_tools import RailWorkflows
+from .railway_service import create_railway_service
+from .tiger_icons import ICONS
 
 LOG = logging.getLogger("rtt.mcp")
 PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "plugins" / "realtime-trains"
 SKILL_URI = "skill://realtime-trains/realtime-trains/SKILL.md"
 
 
-class ActionBackend:
-    def __init__(self, key, base_url="http://127.0.0.1:8765"):
-        parsed = urlsplit(base_url)
-        if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}):
-            raise ValueError("Backend requires HTTPS or loopback HTTP")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("Backend URL must not contain credentials, query or fragment")
-        if not key:
-            raise ValueError("ACTION_API_KEY is required")
-        self.key, self.base_url = key, base_url.rstrip("/")
+class DirectBackend:
+    """Call shared operations in a worker thread, without a web-service hop."""
+    def __init__(self, service):
+        self.service = service
 
     async def __call__(self, path, params):
-        params = {k: str(v).lower() if isinstance(v, bool) else v for k, v in params.items() if v is not None}
-        try:
-            async with httpx.AsyncClient(timeout=90, follow_redirects=False, trust_env=False) as client:
-                response = await client.get(self.base_url + path, params=params,
-                                            headers={"Authorization": "Bearer " + self.key})
-            if 300 <= response.status_code < 400:
-                return {"ok": False, "error": "Backend redirect refused"}
-            if len(response.content) > 1_000_000:
-                return {"ok": False, "error": "Backend response exceeded the size limit"}
-            body = response.json()
-            if not isinstance(body, dict) or not isinstance(body.get("ok"), bool):
-                return {"ok": False, "error": "Invalid backend response"}
-            if response.is_error and body.get("ok"):
-                return {"ok": False, "error": "Backend HTTP error"}
-            return body
-        except (httpx.HTTPError, ValueError):
-            # Never leak request URLs, headers, or upstream HTML through errors.
-            return {"ok": False, "error": "RTT backend unavailable or returned invalid JSON"}
+        params = {k: [str(v).lower() if isinstance(v, bool) else str(v)]
+                  for k, v in params.items() if v is not None}
+        response = await asyncio.to_thread(self.service.execute, path, params)
+        evidence = response.body.get('requestEvidence')
+        if evidence:
+            LOG.info(json.dumps({**evidence, 'ok': response.body.get('ok'), 'transport': 'direct'}))
+        return response.body
 
 
 def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False, progress_images=None):
@@ -124,7 +107,7 @@ def create_server(backend, plugin_root=PLUGIN_ROOT, oauth_enabled=False, progres
     return server
 
 
-def create_http_app(server, key, oauth=None, progress_images=None):
+def create_http_app(server, key, oauth=None, progress_images=None, railway_service=None):
     if not key:
         raise ValueError("MCP bearer key is required")
     manager = StreamableHTTPSessionManager(server, json_response=True, stateless=True,
@@ -155,7 +138,21 @@ def create_http_app(server, key, oauth=None, progress_images=None):
             yield
 
     async def health(request):
-        return JSONResponse({"ok": True, "service": "rtt-mcp", "authentication": "oauth2" if oauth else "bearer"})
+        return JSONResponse({"ok": True, "service": "rtt-mcp", "authentication": "oauth2" if oauth else "bearer",
+                             "backend": "direct" if railway_service else "external"})
+
+    async def rail_map(request):
+        if railway_service is None:
+            return Response(status_code=404)
+        result = await asyncio.to_thread(railway_service._route_map, request.path_params['map_id'])
+        if result.status != 200:
+            return Response(status_code=result.status)
+        return Response(result.body, media_type=result.content_type.split(';')[0],
+                        headers={'X-Content-Type-Options': 'nosniff'})
+
+    async def coach_icon(request):
+        icon = ICONS.get(request.path_params['name'])
+        return Response(icon, media_type='image/svg+xml') if icon else Response(status_code=404)
 
     async def progress_image(request):
         png = await asyncio.to_thread(progress_images.read, request.path_params['image_id']) if progress_images else None
@@ -166,6 +163,8 @@ def create_http_app(server, key, oauth=None, progress_images=None):
 
     return Starlette(routes=[Route("/mcp", Endpoint(), methods=["GET", "POST", "DELETE"]),
                              Route("/mcp/progress/{image_id}.png", progress_image, methods=["GET"]),
+                             Route("/mcp/assets/maps/{map_id}", rail_map, methods=["GET"]),
+                             Route("/mcp/assets/icons/coach-{name}.svg", coach_icon, methods=["GET"]),
                              Route("/health", health)] + (oauth.routes() if oauth else []), lifespan=lifespan)
 
 
@@ -177,7 +176,11 @@ def main():
     args = parser.parse_args()
     load_dotenv()
     key = os.environ.get("ACTION_API_KEY", "").strip()
-    backend = ActionBackend(key, os.environ.get("MCP_BACKEND_URL", "http://127.0.0.1:8765"))
+    service = create_railway_service(
+        base_url=os.environ.get('MCP_ASSET_BASE_URL', 'https://rail.mikegtn.net/mcp/assets'),
+        usage_file=os.environ.get('MCP_USAGE_FILE', '/var/lib/rtt-mcp/usage.json'),
+        map_dir=os.environ.get('MCP_MAP_DIR', '/var/lib/rtt-mcp/maps'))
+    backend = DirectBackend(service)
     oauth = None
     if args.transport == "http" and os.environ.get("OAUTH_DATABASE"):
         from .mcp_oauth import OwnerOAuth
@@ -193,7 +196,7 @@ def main():
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     if args.transport == "http":
         import uvicorn
-        uvicorn.run(create_http_app(server, os.environ.get("MCP_API_KEY", key), oauth, progress_images),
+        uvicorn.run(create_http_app(server, os.environ.get("MCP_API_KEY", key), oauth, progress_images, service),
                     host=args.host, port=args.port, access_log=False)
     else:
         async def run():

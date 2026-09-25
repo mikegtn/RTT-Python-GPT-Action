@@ -201,12 +201,6 @@ class TransportTests(unittest.TestCase):
         self.headers["Origin"] = "https://attacker.example"
         self.assertEqual(self.rpc("tools/list").status_code, 403)
 
-    def test_backend_requires_secure_destination(self):
-        from rtt_app.mcp_server import ActionBackend
-        with self.assertRaises(ValueError):
-            ActionBackend("secret", "http://example.com")
-        with self.assertRaises(ValueError):
-            ActionBackend("secret", "https://user:password@example.com")
 
 
 if __name__ == "__main__":

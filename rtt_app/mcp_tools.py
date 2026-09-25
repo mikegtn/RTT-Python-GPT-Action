@@ -1,6 +1,6 @@
-"""MCP tool contracts and bounded workflows over the existing Action API.
+"""MCP tool contracts and bounded workflows over shared railway operations.
 
-The Action remains the authority: opaque identities and request evidence are
+RTT remains the authority: opaque identities and request evidence are
 returned unchanged. No upstream credentials are exposed to a model.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import secrets
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .action_api import build_openapi_schema
+from .rail_schema import build_openapi_schema
 
 
 def object_schema(properties, required=()):

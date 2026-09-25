@@ -1,7 +1,7 @@
 [Unit]
 Description=Realtime Trains MCP adapter
-After=network-online.target rtt-action.service
-Wants=network-online.target rtt-action.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -10,7 +10,10 @@ Group=www-data
 WorkingDirectory=/opt/rtt-mcp/current
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile=/etc/rtt-action.env
-Environment=MCP_BACKEND_URL=http://127.0.0.1:8765
+Environment=MCP_ASSET_BASE_URL=https://rail.mikegtn.net/mcp/assets
+Environment=MCP_USAGE_FILE=/var/lib/rtt-mcp/usage.json
+Environment=MCP_MAP_DIR=/var/lib/rtt-mcp/maps
+Environment=MOVEBOOK_ROUTE_SCRIPT=/var/www/html/scripts/route_movebook_draft.py
 Environment=OAUTH_DATABASE=/var/lib/rtt-mcp/oauth.sqlite3
 Environment=OAUTH_BRIDGE_KEY_FILE=/etc/rtt-oauth-bridge.key
 Environment=MCP_PROGRESS_IMAGE_DIR=/var/lib/rtt-mcp/progress-images

@@ -5,7 +5,6 @@ set -euo pipefail
 commit=${1:-}
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || { echo 'Supply a full commit SHA.' >&2; exit 1; }
 test -f /etc/rtt-action.env
-systemctl is-active --quiet rtt-action.service
 config=$(readlink -f /etc/apache2/sites-enabled/000-00-rail-action.conf)
 test -f "$config"
 root=/opt/rtt-mcp
@@ -71,7 +70,9 @@ PY
 changed=1
 ln -sfn "$release" "$root/current"
 install -m 0644 "$release/deploy/rtt-mcp.service" /etc/systemd/system/rtt-mcp.service
-install -o root -g www-data -m 0644 "$release/deploy/rtt-oauth.php" "$bridge"
+if ! test -f "$bridge"; then
+    install -o root -g www-data -m 0644 "$release/deploy/rtt-oauth.php" "$bridge"
+fi
 python3 - "$config" <<'PY'
 from pathlib import Path
 import sys
@@ -106,5 +107,5 @@ systemctl reload apache2
 "$release/.venv/bin/python" "$release/deploy/verify_mcp.py" --protocol-only
 curl -fsS https://rail.mikegtn.net/.well-known/oauth-authorization-server >/dev/null
 curl -fsS https://rail.mikegtn.net/.well-known/oauth-protected-resource/mcp >/dev/null
-curl -fsS https://rail.mikegtn.net/health
+curl -fsS http://127.0.0.1:8766/health
 echo "Installed MCP $commit. Backup: $backup. Existing Action and secrets preserved."

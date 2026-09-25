@@ -10,7 +10,7 @@ The nine existing operations retain their names: `getNextDepartures`,
 `searchStationServices`, `getServiceDetails`, `getTigerServiceDetails`,
 `getRttApiInfo`, `getApiUsage`, `suggestRailRoute`, `getJourneyRoute`, and
 `getRailMapSnapshot`. MCP `getJourneyRoute.legs` is a native array; the adapter
-encodes it for the existing Action internally. Results preserve `uniqueIdentity`
+encodes it for the shared railway operations internally. Results preserve `uniqueIdentity`
 and `requestEvidence` without rewriting them.
 
 Additional tools:
@@ -19,7 +19,7 @@ Additional tools:
   `unique_identity` and optional `as_of`; always requests an image and returns
   native MCP image content, a public PNG URL, progress and source evidence.
   Omit `as_of` for live requests. The connected plugin is the preferred user-facing
-  interface; its existing private backend remains an implementation dependency.
+  interface. Railway operations execute directly inside the MCP process.
 
 - `getServiceProgress`: actual-report-based `not_started`, `at_station`,
   `between_calls` and `completed` states for an exact `unique_identity`.
@@ -76,7 +76,7 @@ client secret fields empty when using dynamic registration. Each tool advertises
 Compatible private MCP clients can still provide an Authorization bearer header.
 Configure secrets in the client, never in this package or in chat. The default server
 configuration accepts the existing Action key; `MCP_API_KEY` can separate the
-inbound MCP credential from the upstream Action credential.
+inbound MCP credential from the older API credential.
 
 ChatGPT connects using OAuth at the same MCP URL. Discovery, dynamic client
 registration, S256 PKCE and exact ChatGPT callback matching are supported.
@@ -107,8 +107,23 @@ disabled. The GPT was private (Only me).
 
 From the repository, install the `mcp` extra and run
 `python -m rtt_app.mcp_server --transport http` (loopback port 8766) or use
-`--transport stdio`. `ACTION_API_KEY` and optionally `MCP_BACKEND_URL` configure
-the backend; production uses loopback HTTP, remote backends require HTTPS.
+`--transport stdio`. `RTT_TOKEN` configures direct RTT access; optional TIGER
+credentials enable coach details. HTTP authentication accepts `MCP_API_KEY`
+(falling back to `ACTION_API_KEY`) and existing OAuth tokens. There is no request
+to the Action web service and `MCP_BACKEND_URL` is no longer used.
+
+Both adapters share `rtt_app/railway_service.py`. MCP owns `MCP_USAGE_FILE` and
+`MCP_MAP_DIR`, defaulting to `/var/lib/rtt-mcp/usage.json` and
+`/var/lib/rtt-mcp/maps`; set writable paths when running locally. Its
+`MCP_ASSET_BASE_URL` defaults to `https://rail.mikegtn.net/mcp/assets`, which serves
+its route maps, snapshots and coach icons. Existing Action URLs and counters
+remain unchanged; MCP's new counter starts independently.
+
+The production unit reuses the existing protected environment file for upstream
+credentials. Route geometry still uses `MOVEBOOK_ROUTE_SCRIPT` from Lost::MikeGTN2;
+OAuth consent still uses the website's Admin session and bridge. The updater
+preserves any existing site-owned consent page. These integrations remain, while
+the Action process is no longer a startup or runtime dependency.
 No OpenAI API key is needed: this server provides tools, not model inference.
 
 `deploy/update_mcp.sh COMMIT_SHA` installs a pinned release in a separate virtual
