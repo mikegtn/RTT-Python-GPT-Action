@@ -30,7 +30,7 @@ async def verify(args, key=None):
             async with ClientSession(read, write) as session:
                 initialized = await session.initialize()
                 listed = await session.list_tools()
-                assert len(listed.tools) == 13
+                assert len(listed.tools) == 14
                 await session.read_resource('skill://realtime-trains/realtime-trains/SKILL.md')
                 knowledge = await session.read_resource('skill://realtime-trains/realtime-trains/references/MOVEBOOK.md')
                 assert 'TIGER' in knowledge.contents[0].text
@@ -47,7 +47,7 @@ async def verify(args, key=None):
                         Path(args.output).write_text(json.dumps(report, indent=2), encoding='utf-8')
                     assert not result.isError, f'{name} failed: {data}'
                     assert data and data.get('requestEvidence'), f'{name} missing evidence'
-                    if parameters.get('include_image'):
+                    if parameters.get('include_image') or name == 'getServiceSchematic':
                         value = data['result']
                         assert 'imageError' not in value, value
                         native = [c for c in result.content if c.type == 'image']
@@ -72,9 +72,8 @@ async def verify(args, key=None):
                     assert details['scheduleMetadata']['uniqueIdentity'] == identity
                     for clock, state in [('14:00:00', 'not_started'), ('20:30:00', 'at_station'),
                                          ('20:35:00', 'between_calls'), ('22:00:00', 'completed')]:
-                        progress = await call('getServiceProgress', {
-                            'unique_identity': identity, 'as_of': '2026-09-19T' + clock + '+01:00',
-                            'include_image': getattr(args, 'progress_image', False)})
+                        progress = await call('getServiceSchematic' if getattr(args, 'progress_image', False) else 'getServiceProgress', {
+                            'unique_identity': identity, 'as_of': '2026-09-19T' + clock + '+01:00'})
                         assert progress['state'] == state, progress
                         assert progress['uniqueIdentity'] == identity
                         assert report['calls'][-1]['response']['sourceRequestEvidence']

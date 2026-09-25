@@ -149,13 +149,18 @@ train has not moved; these states are report-based, not GPS. Surface errors when
 evidence cannot support a state. Never fill gaps with forecasts or booked times.
 
 When asked to show service progress as an image or schematic, call
-getServiceProgress with include_image=true and the exact unique_identity; retain
+getServiceSchematic with the exact unique_identity; retain
 as_of for a historical view. Present the native PNG if available and keep the
 returned imageUrl as a View schematic link. Otherwise use imageMarkdown followed
 by imageLinkMarkdown. The marker shows a reported station or segment, never a
 measured distance along that segment. The image is a static evaluation, not a
 live tracker. State any imageError and retain the text progress/evidence. Public
 image links are temporary (up to seven days, subject to storage capacity).
+
+Use this connected MCP plugin for live railway requests. Do not substitute the
+legacy GPT Action or direct web-service calls when a connected tool is missing;
+report the tool-discovery or connection limitation. For current progress and
+schematics omit as_of; preserve explicit dates for historical requests.
 
 The original GPT instructions are preserved verbatim in references/gpt-instructions.md. Read references/MOVEBOOK.md for train progress, next-call and infrastructure-route reasoning. The original knowledge file is preserved byte for byte, including its escaped Markdown formatting; treat that escaping as formatting rather than content.
 

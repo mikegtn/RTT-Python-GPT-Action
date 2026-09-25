@@ -75,7 +75,7 @@ class OAuthTests(unittest.TestCase):
         token = response.json()
         self.assertEqual(self.token(code).status_code, 400)
         catalog = self.rpc(token['access_token']).json()['result']['tools']
-        self.assertEqual(len(catalog), 13)
+        self.assertEqual(len(catalog), 14)
         for tool in catalog:
             self.assertEqual(tool['securitySchemes'], [{'type': 'oauth2', 'scopes': ['rail:access']}])
             self.assertEqual(tool['securitySchemes'], tool['_meta']['securitySchemes'])

@@ -96,6 +96,11 @@ def tool_catalog():
                          "annotations": {"readOnlyHint": True, "destructiveHint": False,
                                          "idempotentHint": True, "openWorldHint": True}}
     catalog["getServiceProgress"]["annotations"].update(readOnlyHint=False, idempotentHint=False)
+    schematic = deepcopy(catalog["getServiceProgress"])
+    schematic.update(name="getServiceSchematic", title="Show a service progress schematic",
+                     description="On request, return a PNG schematic of an exact RTT service with its reported station or segment, late sections and current-position glow. Includes progress and request evidence. Omit as_of for current reports; supply an offset-aware historical datetime for replay. Not GPS. Image failures are reported as imageError.")
+    schematic["inputSchema"]["properties"].pop("include_image")
+    catalog["getServiceSchematic"] = schematic
     return catalog
 
 
@@ -196,10 +201,10 @@ class RailWorkflows:
                               "calls": service.get("calls", []), "origin": service.get("origin"),
                               "destination": service.get("destination"), "reasons": service.get("reasons"),
                               "routeBasis": "Ordered RTT service-detail timing points; no geometry or mileage inferred"}
-                elif name == "getServiceProgress":
+                elif name in {"getServiceProgress", "getServiceSchematic"}:
                     from .service_progress import service_progress
                     result = service_progress(service, identity, arguments.get("as_of"))
-                    if arguments.get("include_image"):
+                    if name == "getServiceSchematic" or arguments.get("include_image"):
                         if self.progress_images is None:
                             result["imageError"] = "Service schematic images are not configured on this server"
                         else:

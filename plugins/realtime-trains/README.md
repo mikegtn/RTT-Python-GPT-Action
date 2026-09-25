@@ -1,6 +1,6 @@
 # Realtime Trains plugin migration
 
-This package preserves the Realtime Trains Assistant behaviour and exposes thirteen
+This package preserves the Realtime Trains Assistant behaviour and exposes fourteen
 MCP tools through `https://rail.mikegtn.net/mcp`. It is a private, authenticated
 integration. The original GPT Action continues to run independently.
 
@@ -14,6 +14,12 @@ encodes it for the existing Action internally. Results preserve `uniqueIdentity`
 and `requestEvidence` without rewriting them.
 
 Additional tools:
+
+- `getServiceSchematic`: first-class PNG progress tool. Accepts the exact
+  `unique_identity` and optional `as_of`; always requests an image and returns
+  native MCP image content, a public PNG URL, progress and source evidence.
+  Omit `as_of` for live requests. The connected plugin is the preferred user-facing
+  interface; its existing private backend remains an implementation dependency.
 
 - `getServiceProgress`: actual-report-based `not_started`, `at_station`,
   `between_calls` and `completed` states for an exact `unique_identity`.

@@ -134,14 +134,15 @@ class ImageTransportTests(unittest.TestCase):
             app = create_http_app(create_server(backend, progress_images=store), 'test-key', progress_images=store)
             with TestClient(app) as client:
                 params = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
-                    'name': 'getServiceProgress', 'arguments': {'unique_identity': 'opaque',
-                    'as_of': '2026-09-19T20:35:00+01:00', 'include_image': True}}}
+                    'name': 'getServiceSchematic', 'arguments': {'unique_identity': 'opaque',
+                    'as_of': '2026-09-19T20:35:00+01:00'}}}
                 self.assertEqual(client.post('/mcp', json=params).status_code, 401)
                 self.assertEqual(list(Path(directory).iterdir()), [])
                 response = client.post('/mcp', json=params, headers={'Authorization': 'Bearer test-key',
                     'Accept': 'application/json, text/event-stream'}).json()['result']
                 self.assertFalse(response['isError'])
                 body = response['structuredContent']
+                self.assertEqual(body['requestEvidence']['operation'], 'getServiceSchematic')
                 self.assertEqual(body['sourceRequestEvidence'], [{'requestId': 'exact-source'}])
                 native = next(c for c in response['content'] if c['type'] == 'image')
                 public = client.get('/mcp/progress/' + body['result']['schematicId'] + '.png')

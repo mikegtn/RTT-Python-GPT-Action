@@ -185,7 +185,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["result"]["serverInfo"]["name"], "realtime-trains")
         catalog = self.rpc("tools/list").json()["result"]["tools"]
-        self.assertEqual(len(catalog), 13)
+        self.assertEqual(len(catalog), 14)
         by_name = {t["name"]: t for t in catalog}
         self.assertFalse(by_name["getRailMapSnapshot"]["annotations"]["readOnlyHint"])
         called = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": "opaque"}}).json()["result"]
