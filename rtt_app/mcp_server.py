@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import os
-from pathlib import Path
 import time
 from urllib.parse import urlsplit
 
@@ -30,8 +29,6 @@ from .cli import load_dotenv
 from .mcp_tools import RailWorkflows
 
 LOG = logging.getLogger("rtt.mcp")
-PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "plugins" / "realtime-trains"
-SKILL_URI = "skill://realtime-trains/realtime-trains/SKILL.md"
 NOAUTH_SCHEMES = [{"type": "noauth"}]
 
 
@@ -70,7 +67,7 @@ class ActionBackend:
             return {"ok": False, "error": "RTT backend unavailable or returned invalid JSON"}
 
 
-def create_server(backend, plugin_root=PLUGIN_ROOT):
+def create_server(backend):
     workflows = RailWorkflows(backend)
     server = Server(
         "realtime-trains",
@@ -138,31 +135,9 @@ def create_server(backend, plugin_root=PLUGIN_ROOT):
             isError=False,
         )
 
-    # Retain resource reads for local/private compatibility. Version 0.1.0 is
-    # submitted as MCP-tools-only, so the public submission does not import
-    # these files as a native Skills extension.
-    resources = {
-        SKILL_URI: ("Realtime Trains behaviour", "SKILL.md"),
-        "skill://realtime-trains/realtime-trains/references/MOVEBOOK.md":
-            ("Original MOVEBOOK knowledge", "references/MOVEBOOK.md"),
-        "skill://realtime-trains/realtime-trains/references/gpt-instructions.md":
-            ("Original GPT instructions", "references/gpt-instructions.md"),
-    }
-
-    @server.list_resources()
-    async def list_resources():
-        return [
-            types.Resource(uri=uri, name=name, mimeType="text/markdown")
-            for uri, (name, _) in resources.items()
-        ]
-
-    @server.read_resource()
-    async def read_resource(uri):
-        if str(uri) not in resources:
-            raise ValueError("Unknown resource")
-        return (
-            plugin_root / "skills" / "realtime-trains" / resources[str(uri)][1]
-        ).read_text(encoding="utf-8")
+    # Version 0.1.0 is intentionally MCP-tools-only. The packaged skill remains
+    # available to local/plugin-package installs but is not exposed for submission
+    # import through this public MCP endpoint.
 
     return server
 
