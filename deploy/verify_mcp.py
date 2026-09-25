@@ -28,7 +28,7 @@ async def verify(args, key=None):
             async with ClientSession(read, write) as session:
                 initialized = await session.initialize()
                 listed = await session.list_tools()
-                assert len(listed.tools) == 12
+                assert len(listed.tools) == 13
                 await session.read_resource('skill://realtime-trains/realtime-trains/SKILL.md')
                 knowledge = await session.read_resource('skill://realtime-trains/realtime-trains/references/MOVEBOOK.md')
                 assert 'TIGER' in knowledge.contents[0].text
@@ -47,6 +47,30 @@ async def verify(args, key=None):
                     assert data and data.get('requestEvidence'), f'{name} missing evidence'
                     print(json.dumps({'tool': name, 'evidence': data['requestEvidence']}), flush=True)
                     return data['result']
+                if getattr(args, 'service_progress', False):
+                    identity = 'gb-nr:G01162:2026-09-19'
+                    details = await call('getServiceDetails', {'unique_identity': identity})
+                    assert details['scheduleMetadata']['uniqueIdentity'] == identity
+                    for clock, state in [('14:00:00', 'not_started'), ('20:30:00', 'at_station'),
+                                         ('20:35:00', 'between_calls'), ('22:00:00', 'completed')]:
+                        progress = await call('getServiceProgress', {
+                            'unique_identity': identity, 'as_of': '2026-09-19T' + clock + '+01:00'})
+                        assert progress['state'] == state, progress
+                        assert progress['uniqueIdentity'] == identity
+                        assert report['calls'][-1]['response']['sourceRequestEvidence']
+                        if state == 'between_calls':
+                            assert progress['from']['name'] == 'Taunton'
+                            assert progress['from']['actualDeparture'] == '2026-09-19T20:30:30'
+                            assert progress['to']['name'] == 'Tiverton Parkway'
+                            assert progress['to']['actualArrival'] is None
+                            assert progress['latenessMinutes'] == 13
+                        elif state == 'at_station':
+                            assert progress['at']['name'] == 'Taunton'
+                            assert progress['at']['actualDeparture'] is None
+                        elif state == 'completed':
+                            assert progress['at']['name'] == 'Plymouth'
+                    print(json.dumps({'serviceProgressRegression': 'PASS', 'uniqueIdentity': identity}), flush=True)
+                    return
                 journeys = await call('findJourneys', {'origin': 'ABD', 'destination': 'PLY',
                     'time_from': datetime.combine(date.fromisoformat(args.date), time(8, 20) if getattr(args, 'multi_interchange', False) else time(), ZoneInfo('Europe/London')).isoformat(),
                     'minutes': 10 if getattr(args, 'multi_interchange', False) else 1439,
@@ -81,6 +105,7 @@ def main():
     parser.add_argument('--env-file', default='/etc/rtt-action.env')
     parser.add_argument('--protocol-only', action='store_true')
     parser.add_argument('--multi-interchange', action='store_true')
+    parser.add_argument('--service-progress', action='store_true')
     parser.add_argument('--date', default='2026-09-19')
     parser.add_argument('--output')
     args = parser.parse_args()

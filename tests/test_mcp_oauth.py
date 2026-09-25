@@ -19,8 +19,9 @@ class OAuthTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.oauth = OwnerOAuth(Path(self.tmp.name) / 'oauth.db', 'bridge-key-' * 5)
         self.resource = RESOURCE
+        self.backend_data = {}
         async def backend(path, params):
-            return {'ok': True, 'result': {}}
+            return {'ok': True, 'result': self.backend_data, 'requestEvidence': {'requestId': 'oauth-source'}}
         self.client = TestClient(create_http_app(create_server(backend, oauth_enabled=True), 'legacy-key', self.oauth),
                                  client=('127.0.0.1', 1234))
         self.client.__enter__()
@@ -74,11 +75,18 @@ class OAuthTests(unittest.TestCase):
         token = response.json()
         self.assertEqual(self.token(code).status_code, 400)
         catalog = self.rpc(token['access_token']).json()['result']['tools']
-        self.assertEqual(len(catalog), 12)
+        self.assertEqual(len(catalog), 13)
         for tool in catalog:
             self.assertEqual(tool['securitySchemes'], [{'type': 'oauth2', 'scopes': ['rail:access']}])
             self.assertEqual(tool['securitySchemes'], tool['_meta']['securitySchemes'])
         self.assertEqual(catalog[0]['_meta']['securitySchemes'][0]['scopes'], ['rail:access'])
+        from tests.test_service_progress import fixture
+        self.backend_data = fixture()
+        progress = self.rpc(token['access_token'], 'tools/call', {'name': 'getServiceProgress',
+            'arguments': {'unique_identity': 'opaque', 'as_of': '2026-09-19T20:35:00+01:00'}}).json()['result']
+        self.assertFalse(progress.get('isError'))
+        self.assertEqual(progress['structuredContent']['result']['state'], 'between_calls')
+        self.assertEqual(progress['structuredContent']['sourceRequestEvidence'], [{'requestId': 'oauth-source'}])
         from rtt_app.mcp_oauth import OwnerOAuth
         reopened = OwnerOAuth(self.oauth.database, self.oauth.bridge_key)
         self.assertIsNotNone(asyncio.run(reopened.load_access_token(token['access_token'])))

@@ -54,6 +54,14 @@ def tool_catalog():
             "path": path,
         }
     additions = [
+        ("getServiceProgress", "Get passenger-friendly service progress",
+         "Derive not_started, at_station, between_calls or completed from actual, non-interpolated RTT movement reports only. "
+         "Optional as_of replays event times from today's service record, not what was known historically. "
+         "Reports are not GPS; missing or contradictory evidence returns an error rather than a guessed state.",
+         object_schema({"unique_identity": IDENTITY,
+                        "as_of": {"type": "string", "format": "date-time",
+                                  "description": "Optional ISO datetime with explicit UTC offset; inclusive event cutoff."}},
+                       ["unique_identity"])),
         ("findJourneys", "Find dated passenger journeys",
          "Search direct trains and journeys with up to three changes among supplied interchange stations. The stations are candidates, not mandatory ordered vias. Inspect exact RTT services, "
          "advertised times, restrictions and cancellations. Bounded search, not a complete journey planner; "
@@ -183,6 +191,9 @@ class RailWorkflows:
                               "calls": service.get("calls", []), "origin": service.get("origin"),
                               "destination": service.get("destination"), "reasons": service.get("reasons"),
                               "routeBasis": "Ordered RTT service-detail timing points; no geometry or mileage inferred"}
+                elif name == "getServiceProgress":
+                    from .service_progress import service_progress
+                    result = service_progress(service, identity, arguments.get("as_of"))
                 else:
                     now = datetime.now(timezone.utc)
                     reports = []

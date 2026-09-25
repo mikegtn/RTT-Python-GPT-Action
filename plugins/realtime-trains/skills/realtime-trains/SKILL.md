@@ -137,6 +137,17 @@ Use findJourneys for dated journey options. Supply up to three plausible interch
 
 Use getTrainLocation for the latest actual timing report. State reportedAt and report age; never describe it as GPS or infer a present position from a forecast. Use getRouteDetails for ordered service timing points without generating a map.
 
+Use getServiceProgress for passenger progress, passing the exact unique_identity.
+Optional as_of must be an ISO datetime with an explicit offset. It replays actual
+event times in the currently retrieved RTT record, not the information available
+at that historical instant. Preserve requestEvidence and sourceRequestEvidence.
+The states are not_started (no actual report yet), at_station (actual arrival
+without a later actual departure or pass), between_calls (actual station departure
+and next non-cancelled passenger call), and completed (actual final arrival).
+State the evaluation time and report timestamp. Missing reports do not prove a
+train has not moved; these states are report-based, not GPS. Surface errors when
+evidence cannot support a state. Never fill gaps with forecasts or booked times.
+
 The original GPT instructions are preserved verbatim in references/gpt-instructions.md. Read references/MOVEBOOK.md for train progress, next-call and infrastructure-route reasoning. The original knowledge file is preserved byte for byte, including its escaped Markdown formatting; treat that escaping as formatting rather than content.
 
 For location questions, anchor the answer in the last actual, non-interpolated RTT report and its timestamp. An arrival without a departure means the last report places the train at that station; a missing departure report does not prove it is still there now. Exclude cancelled and non-passenger calls when identifying the next advertised stop. Forecast times do not prove a train has passed a location. If useful, use suggestRailRoute between the last report and next call, clearly labelled as inferred infrastructure geometry rather than GPS or proof of the train's actual path. Resolve ambiguous locations using returned choices and exact service identifiers. Keep RTT service facts, Movebook topology and TIGER facilities distinct.

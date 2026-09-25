@@ -1,6 +1,6 @@
 # Realtime Trains plugin migration
 
-This package preserves the Realtime Trains Assistant behaviour and exposes twelve
+This package preserves the Realtime Trains Assistant behaviour and exposes thirteen
 MCP tools through `https://rail.mikegtn.net/mcp`. It is a private, authenticated
 integration. The original GPT Action continues to run independently.
 
@@ -14,6 +14,16 @@ encodes it for the existing Action internally. Results preserve `uniqueIdentity`
 and `requestEvidence` without rewriting them.
 
 Additional tools:
+
+- `getServiceProgress`: actual-report-based `not_started`, `at_station`,
+  `between_calls` and `completed` states for an exact `unique_identity`.
+  Optional offset-aware `as_of` is an inclusive historical event cutoff.
+  Returns station endpoints, actual and scheduled times, RTT lateness, an explicit
+  non-GPS basis, and source evidence. Forecasts and interpolated reports cannot
+  establish movement. Conflicting or insufficient evidence produces an error.
+  Historical replay uses today's retrieved record, not historical receipt times
+  or former timetable/cancellation revisions. Run the live regression with
+  `python deploy/verify_mcp.py --service-progress --output progress.json`.
 
 - `findJourneys`: direct trains and up to three changes among three caller-supplied
   candidate interchange stations, explored in any order. `max_changes` can limit
