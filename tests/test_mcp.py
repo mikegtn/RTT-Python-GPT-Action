@@ -106,18 +106,19 @@ class TransportTests(unittest.TestCase):
             self.calls.append((path, params))
             return {"ok": True, "result": service(params.get("unique_identity", "opaque")),
                     "requestEvidence": {"requestId": "unchanged", "operation": "getServiceDetails"}}
-        self.client = TestClient(create_http_app(create_server(backend), "test-key"))
+        self.client = TestClient(create_http_app(create_server(backend)))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        self.headers = {"Authorization": "Bearer test-key", "Accept": "application/json, text/event-stream"}
+        self.headers = {"Accept": "application/json, text/event-stream"}
 
     def rpc(self, method, params=None):
         return self.client.post("/mcp", headers=self.headers,
                                 json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}})
 
-    def test_unauthorized_all_methods(self):
-        for method in ["GET", "POST", "DELETE"]:
-            self.assertEqual(self.client.request(method, "/mcp").status_code, 401)
+    def test_public_endpoint_does_not_require_credentials(self):
+        response = self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                          "clientInfo": {"name": "test", "version": "1"}})
+        self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.calls, [])
 
     def test_initialize_list_call_resource_and_invalid_input(self):
@@ -129,9 +130,17 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(len(catalog), 12)
         by_name = {t["name"]: t for t in catalog}
         self.assertFalse(by_name["getRailMapSnapshot"]["annotations"]["readOnlyHint"])
+        for tool in catalog:
+            self.assertEqual(tool["securitySchemes"], [{"type": "noauth"}])
+            self.assertEqual(tool["_meta"]["securitySchemes"], [{"type": "noauth"}])
+            self.assertIn("outputSchema", tool)
+            self.assertNotEqual(tool["outputSchema"], {
+                "type": "object", "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"], "additionalProperties": True})
         called = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": "opaque"}}).json()["result"]
-        self.assertEqual(called["structuredContent"]["requestEvidence"]["requestId"], "unchanged")
-        self.assertEqual(called["structuredContent"]["result"]["scheduleMetadata"]["uniqueIdentity"], "opaque")
+        self.assertEqual(called["structuredContent"]["scheduleMetadata"]["uniqueIdentity"], "opaque")
+        self.assertNotIn("requestEvidence", called["structuredContent"])
+        self.assertNotIn("sourceRequestEvidence", called["structuredContent"])
         invalid = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": 123}}).json()["result"]
         self.assertTrue(invalid["isError"])
         self.assertEqual(len(self.calls), 1)
