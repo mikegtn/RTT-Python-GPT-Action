@@ -55,7 +55,7 @@ def tool_catalog():
         }
     additions = [
         ("findJourneys", "Find dated passenger journeys",
-         "Search direct trains and up to three supplied interchange stations. Inspect exact RTT services, "
+         "Search direct trains and journeys with up to three changes among supplied interchange stations. The stations are candidates, not mandatory ordered vias. Inspect exact RTT services, "
          "advertised times, restrictions and cancellations. Bounded search, not a complete journey planner; "
          "minimum interchange times are not verified. Returns up to three options and coverage limits.",
          object_schema({"origin": STATION, "destination": STATION,
@@ -64,6 +64,7 @@ def tool_catalog():
                         "minutes": {"type": "integer", "minimum": 1, "maximum": 1439, "default": 720},
                         "interchanges": {"type": "array", "maxItems": 3, "uniqueItems": True,
                                          "items": STATION, "default": []},
+                        "max_changes": {"type": "integer", "minimum": 0, "maximum": 3, "default": 3},
                         "connection_minutes": {"type": "integer", "minimum": 1, "maximum": 180,
                                                "default": 15,
                                                "description": "Search buffer, not a verified minimum interchange time."}},
@@ -209,59 +210,129 @@ class RailWorkflows:
         return body
 
     async def find_journeys(self, request, origin, destination, time_from, minutes=720,
-                            interchanges=None, connection_minutes=15):
+                            interchanges=None, connection_minutes=15, max_changes=3):
         start = timestamp(time_from, require_offset=True)
         end = start + timedelta(minutes=minutes)
-        interchanges = interchanges or []
-        cache, coverage, options = {}, [], []
-        # Six candidates per board bounds upstream work. Every limit is disclosed.
+        if not 0 <= max_changes <= 3 or not 1 <= minutes <= 1439 or not 1 <= connection_minutes <= 180:
+            raise ValueError("Invalid journey search limits")
+        normalize = lambda value: value.strip().casefold()
+        nodes = list(dict.fromkeys(normalize(s) for s in (interchanges or [])))
+        if len(nodes) > 3 or normalize(origin) == normalize(destination):
+            raise ValueError("Supply distinct endpoints and at most three interchange stations")
+        nodes = [s for s in nodes if s not in {normalize(origin), normalize(destination)}]
+        cache, boards, coverage, options = {}, {}, [], []
+        requests_used, budget_hit, frontier_cut = 0, False, False
+        request_limit, frontier_limit = 96, 18
+        horizon = start + timedelta(hours=36)
+
+        async def fetch(path, params):
+            nonlocal requests_used, budget_hit
+            if requests_used >= request_limit:
+                budget_hit = True
+                return None
+            requests_used += 1
+            return await request(path, params)
+
         async def legs(a, b, begin, window):
-            board = await request("/v1/services", {"station": a, "filter_to": b,
-                                  "time_from": begin.isoformat(), "minutes": window,
-                                  "movement": "departures", "count": 6})
+            key = (a, b, begin, window)
+            if key in boards:
+                return boards[key]
+            board = await fetch("/v1/services", {"station": a, "filter_to": b,
+                                "time_from": (begin - timedelta(minutes=1)).astimezone(ZoneInfo("Europe/London")).isoformat(),
+                                "time_to": (begin + timedelta(minutes=window)).astimezone(ZoneInfo("Europe/London")).isoformat(),
+                                "minutes": window,
+                                "movement": "departures", "count": 6})
+            if board is None:
+                return []
             items = board.get("services") or []
             coverage.append({"origin": a, "destination": b, "timeFrom": begin.isoformat(),
                              "minutes": window, "candidatesReturned": len(items),
                              "candidateLimit": 6, "possiblyTruncated": len(items) >= 6})
-            result = []
-            for item in items:
+            result, seen = [], set()
+            for item in items[:6]:
                 identity = (item.get("scheduleMetadata") or {}).get("uniqueIdentity")
-                if not identity:
+                if not identity or identity in seen:
                     continue
+                seen.add(identity)
                 if identity not in cache:
-                    cache[identity] = await request("/v1/service", {"unique_identity": identity})
+                    data = await fetch("/v1/service", {"unique_identity": identity})
+                    if data is None:
+                        break
+                    cache[identity] = data
                 leg = passenger_leg(cache[identity], identity, a, b)
                 if leg and begin <= timestamp(leg["departure"]["scheduleAdvertised"]) < begin + timedelta(minutes=window):
-                    result.append(leg)
+                    if timestamp(leg["arrival"]["scheduleAdvertised"]) <= horizon:
+                        result.append(leg)
+            boards[key] = result
             return result
 
-        for leg in await legs(origin, destination, start, minutes):
-            options.append({"legs": [leg], "warnings": []})
-        for interchange in interchanges:
-            first = await legs(origin, interchange, start, minutes)
-            if not first:
-                continue
-            earliest = min(timestamp(l["arrival"]["scheduleAdvertised"]) for l in first)
-            onward = await legs(interchange, destination, earliest, 1439)
-            for a in first:
-                for b in onward:
-                    if a["uniqueIdentity"] == b["uniqueIdentity"]:
-                        continue
-                    gap = (timestamp(b["departure"]["scheduleAdvertised"]) - timestamp(a["arrival"]["scheduleAdvertised"])).total_seconds() / 60
-                    if not connection_minutes <= gap <= 240:
-                        continue
-                    warnings = ["Minimum interchange time has not been verified; the buffer is a search assumption."]
-                    latest_a = a["arrival"].get("realtimeActual") or a["arrival"].get("realtimeForecast")
-                    latest_b = b["departure"].get("realtimeActual") or b["departure"].get("realtimeForecast")
-                    if latest_a and latest_b and (timestamp(latest_b) - timestamp(latest_a)).total_seconds() < connection_minutes * 60:
-                        warnings.append("Latest running times do not allow the assumed connection buffer.")
-                    options.append({"legs": [a, b], "connectionMinutes": gap, "warnings": warnings})
-        options.sort(key=lambda o: timestamp(o["legs"][-1]["arrival"]["scheduleAdvertised"]))
+        # Breadth-first bounded search: destination first at each state, then
+        # unvisited candidate stations. Never reuse a train or interchange.
+        frontier = [([], {normalize(origin)}, [], [])]
+        seen_options = set()
+        for depth in range(max_changes + 1):
+            following = []
+            for route, visited, connections, warnings in frontier:
+                a = route[-1]["destination"] if route else origin
+                arrival = timestamp(route[-1]["arrival"]["scheduleAdvertised"]) if route else None
+                begin = arrival + timedelta(minutes=connection_minutes) if route else start
+                window = 241 - connection_minutes if route else minutes
+                targets = [destination] + ([s.upper() for s in nodes if s not in visited]
+                                           if depth < max_changes else [])
+                for b in targets:
+                    for leg in await legs(a, b, begin, window):
+                        if any(old["uniqueIdentity"] == leg["uniqueIdentity"] for old in route):
+                            continue
+                        new_connections, new_warnings = list(connections), list(warnings)
+                        if route:
+                            gap = (timestamp(leg["departure"]["scheduleAdvertised"]) - arrival).total_seconds() / 60
+                            if not connection_minutes <= gap <= 240:
+                                continue
+                            latest_a = route[-1]["arrival"].get("realtimeActual") or route[-1]["arrival"].get("realtimeForecast")
+                            latest_b = leg["departure"].get("realtimeActual") or leg["departure"].get("realtimeForecast")
+                            latest_gap = ((timestamp(latest_b) - timestamp(latest_a)).total_seconds() / 60
+                                          if latest_a and latest_b else None)
+                            new_connections.append({"station": a, "scheduledMinutes": gap,
+                                                    "latestMinutes": latest_gap,
+                                                    "minimumConnectionTimeVerified": False})
+                            if latest_gap is not None and latest_gap < connection_minutes:
+                                new_warnings.append(f"Latest running times at {a} do not allow the assumed connection buffer.")
+                        new_route = route + [leg]
+                        if normalize(b) == normalize(destination):
+                            signature = tuple((l["uniqueIdentity"], l["origin"], l["destination"]) for l in new_route)
+                            if signature in seen_options:
+                                continue
+                            seen_options.add(signature)
+                            option = {"legs": new_route, "changes": len(new_connections),
+                                      "connections": new_connections,
+                                      "warnings": (["Minimum interchange time has not been verified; the buffer is a search assumption."]
+                                                   if new_connections else []) + new_warnings}
+                            if len(new_connections) == 1:
+                                option["connectionMinutes"] = new_connections[0]["scheduledMinutes"]
+                            options.append(option)
+                        else:
+                            following.append((new_route, visited | {normalize(b)}, new_connections, new_warnings))
+                    if budget_hit:
+                        break
+                if budget_hit:
+                    break
+            if budget_hit:
+                break
+            following.sort(key=lambda state: timestamp(state[0][-1]["arrival"]["scheduleAdvertised"]))
+            frontier_cut |= len(following) > frontier_limit
+            frontier = following[:frontier_limit]
+            if not frontier:
+                break
+        options.sort(key=lambda o: (timestamp(o["legs"][-1]["arrival"]["scheduleAdvertised"]), o["changes"]))
         return {"origin": origin, "destination": destination, "timeFrom": start.isoformat(),
                 "timeTo": end.isoformat(), "itineraries": options[:3], "matchedOptions": len(options),
                 "coverage": coverage, "connectionBufferMinutes": connection_minutes,
+                "maxChanges": max_changes, "backendRequests": requests_used,
+                "requestLimit": request_limit, "requestLimitReached": budget_hit,
+                "frontierLimit": frontier_limit, "frontierTruncated": frontier_cut,
                 "timeZone": "Europe/London for RTT timestamps without an explicit offset",
                 "minimumConnectionTimesVerified": False,
-                "coverageLimit": "Direct and supplied single-interchange routes only; six candidates per board, "
-                                 "onward search under 24 hours, waits at most four hours. Not exhaustive; "
+                "coverageLimit": "Up to three changes among supplied candidate stations; six candidates per board, "
+                                 "18 partial journeys per depth, 96 backend requests, arrivals within 36 hours of search start, "
+                                 "waits at most four hours. timeTo limits the initial departure only. Not exhaustive; "
                                  "no claim of fastest, earliest or only service. Live data can change."}

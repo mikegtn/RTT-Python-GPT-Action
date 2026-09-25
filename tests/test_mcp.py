@@ -95,6 +95,65 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["result"]["minimumConnectionTimesVerified"])
         self.assertEqual(len(result["sourceRequestEvidence"]), 6)
 
+    async def test_three_legs_reject_bad_connections_and_keep_exact_evidence(self):
+        data = {
+            "first": service("first", "ABD", "EDB", "08:20", "10:55"),
+            "middle": service("middle", "EDB", "BHM", "12:52", "17:06"),
+            "early": service("early", "BHM", "PLY", "17:10", "21:00"),
+            "cancelled": service("cancelled", "BHM", "PLY", "18:00", "21:30"),
+            "last": service("last", "BHM", "PLY", "18:12", "21:47"),
+        }
+        data["cancelled"]["calls"][0]["temporalData"]["departure"]["isCancelled"] = True
+        data["middle"]["calls"][1]["temporalData"]["arrival"]["realtimeActual"] = "2026-09-19T18:05:00+01:00"
+        data["last"]["calls"][0]["temporalData"]["departure"]["realtimeActual"] = "2026-09-19T18:12:00+01:00"
+        boards = {("ABD", "EDB"): ["first"], ("EDB", "BHM"): ["middle"],
+                  ("BHM", "PLY"): ["early", "cancelled", "last", "last"]}
+        events = []
+        async def backend(path, params):
+            events.append({"requestId": str(len(events))})
+            result = data[params["unique_identity"]] if path == "/v1/service" else {
+                "services": [{"scheduleMetadata": {"uniqueIdentity": i}}
+                             for i in boards.get((params["station"], params["filter_to"]), [])]}
+            return {"ok": True, "result": result, "requestEvidence": events[-1]}
+        args = {"origin": "ABD", "destination": "PLY", "time_from": "2026-09-19T08:20:00+01:00",
+                "minutes": 1, "interchanges": ["BHM", "EDB"]}
+        result = await RailWorkflows(backend).call("findJourneys", args)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sourceRequestEvidence"], events)
+        self.assertEqual(result["result"]["matchedOptions"], 1)
+        journey = result["result"]["itineraries"][0]
+        self.assertEqual([l["uniqueIdentity"] for l in journey["legs"]], ["first", "middle", "last"])
+        self.assertEqual(journey["changes"], 2)
+        self.assertEqual([c["scheduledMinutes"] for c in journey["connections"]], [117, 66])
+        self.assertEqual(journey["connections"][1]["latestMinutes"], 7)
+        self.assertIn("BHM", journey["warnings"][-1])
+        limited = await RailWorkflows(backend).call("findJourneys", {**args, "max_changes": 1})
+        self.assertEqual(limited["result"]["itineraries"], [])
+
+    async def test_three_changes_and_overnight_connection(self):
+        stations = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+        data = [service(str(i), stations[i], stations[i+1], dep, arr)
+                for i, (dep, arr) in enumerate([("18:00", "19:00"), ("19:30", "20:00"),
+                                                ("20:30", "23:50"), ("00:20", "01:00")])]
+        for call in data[3]["calls"]:
+            for timing in call["temporalData"].values():
+                if isinstance(timing, dict):
+                    timing["scheduleAdvertised"] = timing["scheduleAdvertised"].replace("09-19", "09-20")
+        async def backend(path, params):
+            if path == "/v1/service":
+                value = data[int(params["unique_identity"])]
+            else:
+                value = {"services": [s for i,s in enumerate(data)
+                         if (params["station"], params["filter_to"]) == (stations[i],stations[i+1])]}
+            return {"ok": True, "result": value}
+        result = await RailWorkflows(backend).call("findJourneys", {
+            "origin":"AAA", "destination":"EEE", "time_from":"2026-09-19T18:00:00+01:00",
+            "minutes":1, "interchanges":["DDD","BBB","CCC"]})
+        journey = result["result"]["itineraries"][0]
+        self.assertEqual(journey["changes"], 3)
+        self.assertEqual(journey["connections"][-1]["scheduledMinutes"], 30)
+        self.assertEqual([l["uniqueIdentity"] for l in journey["legs"]], ["0","1","2","3"])
+
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "Install the mcp extra for transport tests")
 class TransportTests(unittest.TestCase):

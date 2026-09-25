@@ -15,8 +15,13 @@ and `requestEvidence` without rewriting them.
 
 Additional tools:
 
-- `findJourneys`: direct trains and up to three caller-supplied interchanges;
-  six candidates per search, up to three returned options. Uses advertised
+- `findJourneys`: direct trains and up to three changes among three caller-supplied
+  candidate interchange stations, explored in any order. `max_changes` can limit
+  changes to 0-3 (default 3). Six candidates per board, 18 partial journeys per
+  depth and 96 backend requests bound the search; up to three options are returned.
+  Each connection reports scheduled and available actual/forecast gaps, with
+  warnings for insufficient live buffers. Arrivals are limited to 36 hours after
+  search start; `minutes` limits only the initial departure window. Uses advertised
   times, passenger call restrictions, cancellations and chronological checks.
   It is not an exhaustive national journey planner. A connection buffer is an
   assumption, not a sourced minimum interchange time.

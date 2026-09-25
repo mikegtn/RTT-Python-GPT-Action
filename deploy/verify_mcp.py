@@ -48,10 +48,14 @@ async def verify(args, key=None):
                     print(json.dumps({'tool': name, 'evidence': data['requestEvidence']}), flush=True)
                     return data['result']
                 journeys = await call('findJourneys', {'origin': 'ABD', 'destination': 'PLY',
-                    'time_from': datetime.combine(date.fromisoformat(args.date), time(), ZoneInfo('Europe/London')).isoformat(), 'minutes': 1439,
-                    'interchanges': ['EDB', 'NCL', 'YRK']})
+                    'time_from': datetime.combine(date.fromisoformat(args.date), time(8, 20) if getattr(args, 'multi_interchange', False) else time(), ZoneInfo('Europe/London')).isoformat(),
+                    'minutes': 10 if getattr(args, 'multi_interchange', False) else 1439,
+                    'interchanges': ['EDB', 'BHM'] if getattr(args, 'multi_interchange', False) else ['EDB', 'NCL', 'YRK']})
                 assert journeys['itineraries'], 'No Aberdeen to Plymouth itinerary in the bounded search'
                 chosen = journeys['itineraries'][0]
+                if getattr(args, 'multi_interchange', False):
+                    assert len(chosen['legs']) == 3, 'Expected Aberdeen-Edinburgh-Birmingham-Plymouth'
+                    assert [c['station'] for c in chosen['connections']] == ['EDB', 'BHM']
                 legs = [{'unique_identity': l['uniqueIdentity'], 'origin': l['origin'], 'destination': l['destination']}
                         for l in chosen['legs']]
                 for leg in legs:
@@ -76,6 +80,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', default='/etc/rtt-action.env')
     parser.add_argument('--protocol-only', action='store_true')
+    parser.add_argument('--multi-interchange', action='store_true')
     parser.add_argument('--date', default='2026-09-19')
     parser.add_argument('--output')
     args = parser.parse_args()

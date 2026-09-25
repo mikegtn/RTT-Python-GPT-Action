@@ -133,7 +133,7 @@ directional emoji. Preserve all date/reconciliation warnings alongside icons.
 
 ## MCP workflows
 
-Use findJourneys for dated journey options. Supply plausible interchange station codes when connections are relevant. Report its candidate and coverage limits. The connection buffer is an assumption, not a verified station minimum. The MCP getJourneyRoute tool takes a native legs array rather than an encoded JSON string.
+Use findJourneys for dated journey options. Supply up to three plausible interchange station codes when connections are relevant. They are candidate stations explored in any order, not mandatory vias. The search supports up to three changes (max_changes defaults to 3), with bounded request and frontier limits. For Aberdeen-Plymouth, consider EDB and BHM as well as NCL. Inspect every returned connection and live-time warning. Report its candidate and coverage limits. The connection buffer is an assumption, not a verified station minimum. The MCP getJourneyRoute tool takes a native legs array rather than an encoded JSON string.
 
 Use getTrainLocation for the latest actual timing report. State reportedAt and report age; never describe it as GPS or infer a present position from a forecast. Use getRouteDetails for ordered service timing points without generating a map.
 
