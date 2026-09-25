@@ -3,10 +3,14 @@ declare(strict_types=1);
 // Installed narrowly under the existing site's /admin/. No admin access is delegated.
 require_once dirname(__DIR__) . '/includes/bootstrap.php';
 require_once dirname(__DIR__) . '/includes/admin-auth.php';
-admin_start_session();
+// A cross-site OAuth arrival does not carry the Strict Admin cookie. Starting
+// a session here would replace the existing login cookie with an empty session.
+$crossSiteArrival = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
+    && ($_SERVER['HTTP_SEC_FETCH_SITE'] ?? '') === 'cross-site';
+if (!$crossSiteArrival) { admin_start_session(); }
 header('Cache-Control: no-store');
 header('Referrer-Policy: no-referrer');
-header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'; base-uri 'none'");
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 
@@ -28,7 +32,7 @@ function rtt_owner_call(string $operation, array $payload): array {
 $flow = $_GET['request'] ?? '';
 $error = '';
 $pending = null;
-$authenticated = admin_session_is_authenticated();
+$authenticated = !$crossSiteArrival && admin_session_is_authenticated();
 if (!is_string($flow) || !preg_match('/\A[A-Za-z0-9_-]{43}\z/', $flow)) {
     $error = 'Start the connection from ChatGPT to create a valid request.';
     http_response_code(400);
@@ -38,10 +42,13 @@ if (!is_string($flow) || !preg_match('/\A[A-Za-z0-9_-]{43}\z/', $flow)) {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $csrf = $_POST['csrf'] ?? '';
             $decision = $_POST['decision'] ?? '';
-            if (!is_string($csrf) || !hash_equals($_SESSION['rtt_oauth_csrf'], $csrf)
-                || !in_array($decision, ['allow', 'deny'], true)) {
+            if (!is_string($csrf) || !hash_equals($_SESSION['rtt_oauth_csrf'], $csrf)) {
                 http_response_code(403);
                 throw new RuntimeException('The security check failed. Reload this page and try again.');
+            }
+            if (!in_array($decision, ['allow', 'deny'], true)) {
+                http_response_code(400);
+                throw new RuntimeException('The consent choice was not submitted. Open the consent form again and choose Allow railway access or Cancel.');
             }
             $result = rtt_owner_call('approve', ['request' => $flow, 'allow' => $decision === 'allow']);
             $redirect = $result['redirect'] ?? '';
@@ -65,6 +72,7 @@ if (!is_string($flow) || !preg_match('/\A[A-Za-z0-9_-]{43}\z/', $flow)) {
 <main><h1>Connect Realtime Trains to ChatGPT</h1>
 <?php if ($error !== ''): ?>
 <p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+<p><a href="?request=<?= rawurlencode(is_string($flow) ? $flow : '') ?>">Open consent form again</a></p>
 <?php elseif (!$authenticated): ?>
 <p>Sign in to your existing website Admin account, then return here to continue.</p>
 <p><a class="button" href="/admin/" target="_blank" rel="noopener noreferrer">Sign in to Admin</a></p>
@@ -75,8 +83,13 @@ if (!is_string($flow) || !preg_match('/\A[A-Za-z0-9_-]{43}\z/', $flow)) {
 <p>Connection: <strong><?= htmlspecialchars((string) $pending['clientName'], ENT_QUOTES, 'UTF-8') ?></strong></p>
 <form method="post" action="?request=<?= rawurlencode($flow) ?>">
 <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['rtt_oauth_csrf'], ENT_QUOTES, 'UTF-8') ?>">
-<button name="decision" value="allow">Allow railway access</button>
-<button class="secondary" name="decision" value="deny">Cancel</button>
+<input type="hidden" name="decision" value="allow">
+<button type="submit">Allow railway access</button>
+</form>
+<form method="post" action="?request=<?= rawurlencode($flow) ?>">
+<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['rtt_oauth_csrf'], ENT_QUOTES, 'UTF-8') ?>">
+<input type="hidden" name="decision" value="deny">
+<button type="submit" class="secondary">Cancel</button>
 </form>
 <small>Access tokens last one hour. ChatGPT can renew the connection for up to 30 days of inactivity. You can disconnect the app in ChatGPT.</small>
 <?php endif; ?></main></html>
