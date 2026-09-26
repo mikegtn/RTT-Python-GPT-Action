@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import secrets
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -265,6 +266,8 @@ FIND_JOURNEYS_RESULT = object_schema(
         "requestLimitReached": {"type": "boolean"},
         "frontierLimit": {"type": "integer", "minimum": 1},
         "frontierTruncated": {"type": "boolean"},
+        "timeLimitSeconds": {"type": "integer", "minimum": 1},
+        "timeLimitReached": {"type": "boolean"},
         "timeZone": STRING,
         "minimumConnectionTimesVerified": {"type": "boolean"},
         "coverageLimit": STRING,
@@ -618,16 +621,26 @@ class RailWorkflows:
         nodes = [s for s in nodes if s not in {normalize(origin), normalize(destination)}]
         cache, boards, coverage, options = {}, {}, [], []
         requests_used, budget_hit, frontier_cut = 0, False, False
+        time_limit, time_limit_hit = 150, False
+        deadline = monotonic() + time_limit
         request_limit, frontier_limit = 96, 18
         horizon = start + timedelta(hours=36)
 
         async def fetch(path, params):
-            nonlocal requests_used, budget_hit
+            nonlocal requests_used, budget_hit, time_limit_hit
+            remaining = deadline - monotonic()
+            if remaining <= 0 or time_limit_hit:
+                time_limit_hit = True
+                return None
             if requests_used >= request_limit:
                 budget_hit = True
                 return None
             requests_used += 1
-            return await request(path, params)
+            try:
+                return await asyncio.wait_for(request(path, params), timeout=remaining)
+            except TimeoutError:
+                time_limit_hit = True
+                return None
 
         async def legs(a, b, begin, window):
             key = (a, b, begin, window)
@@ -717,11 +730,11 @@ class RailWorkflows:
                             options.append(option)
                         else:
                             following.append((new_route, visited | {normalize(b)}, new_connections, new_warnings))
-                    if budget_hit:
+                    if budget_hit or time_limit_hit:
                         break
-                if budget_hit:
+                if budget_hit or time_limit_hit:
                     break
-            if budget_hit:
+            if budget_hit or time_limit_hit:
                 break
             following.sort(key=lambda state: timestamp(state[0][-1]["arrival"]["scheduleAdvertised"]))
             frontier_cut |= len(following) > frontier_limit
@@ -735,9 +748,10 @@ class RailWorkflows:
                 "maxChanges": max_changes, "backendRequests": requests_used,
                 "requestLimit": request_limit, "requestLimitReached": budget_hit,
                 "frontierLimit": frontier_limit, "frontierTruncated": frontier_cut,
+                "timeLimitSeconds": time_limit, "timeLimitReached": time_limit_hit,
                 "timeZone": "Europe/London for RTT timestamps without an explicit offset",
                 "minimumConnectionTimesVerified": False,
                 "coverageLimit": "Up to three changes among supplied candidate stations; six candidates per board, "
-                                 "18 partial journeys per depth, 96 backend requests, arrivals within 36 hours of search start, "
+                                 "18 partial journeys per depth, 96 backend requests, 150 seconds, arrivals within 36 hours of search start, "
                                  "waits at most four hours. timeTo limits the initial departure only. Not exhaustive; "
                                  "no claim of fastest, earliest or only service. Live data can change."}

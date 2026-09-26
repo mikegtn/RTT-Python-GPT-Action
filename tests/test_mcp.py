@@ -20,6 +20,27 @@ def service(identity="opaque-rtt-identity", origin="ABD", destination="PLY", dep
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_journey_deadline_returns_verified_options_with_coverage_flag(self):
+        from unittest.mock import patch
+        ticks = iter([0, 0, 0])
+        async def backend(path, params):
+            if path == "/v1/service":
+                return {"ok": True, "result": service()}
+            return {"ok": True, "result": {"services": [service()]}}
+        with patch("rtt_app.mcp_tools.monotonic", side_effect=lambda: next(ticks, 151)):
+            result = await RailWorkflows(backend).call("findJourneys", {
+                "origin": "ABD", "destination": "PLY", "time_from": "2026-09-19T07:00:00+01:00",
+                "interchanges": ["EDB"]})
+        self.assertTrue(result["ok"], result)
+        value = result["result"]
+        self.assertTrue(value["timeLimitReached"])
+        self.assertFalse(value["requestLimitReached"])
+        self.assertEqual(value["backendRequests"], 2)
+        self.assertEqual(value["itineraries"][0]["legs"][0]["uniqueIdentity"], "opaque-rtt-identity")
+        if importlib.util.find_spec("jsonschema"):
+            from jsonschema import validate
+            validate(value, tool_catalog()["findJourneys"]["outputSchema"])
+
     async def test_full_day_search_respects_rtt_duration_and_includes_late_train(self):
         from datetime import timedelta
         queries = []

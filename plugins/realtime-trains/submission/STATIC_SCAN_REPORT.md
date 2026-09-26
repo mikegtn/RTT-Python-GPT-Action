@@ -22,7 +22,8 @@ Platform Scan Tools result.
 - RTT and TIGER credentials remain in the protected server environment. The
   separate authenticated GPT Action retains its existing service and key.
 - Global ceiling of 240 MCP requests per minute, four concurrent tool executions,
-  bounded journey searches and request-size/deadline limits.
+  bounded journey searches and request-size/deadline limits. A 150-second journey
+  deadline preserves verified partial results and reports timeLimitReached.
 
 ## Verification
 

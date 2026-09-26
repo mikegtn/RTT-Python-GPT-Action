@@ -57,7 +57,8 @@ The server currently exposes fourteen MCP tools:
 - `findJourneys`: direct trains and up to three changes among three caller-supplied
   candidate interchange stations, explored in any order. `max_changes` can limit
   changes to 0-3 (default 3). Six candidates per board, 18 partial journeys per
-  depth and 96 backend requests bound the search; up to three options are returned.
+  depth, 96 backend requests and 150 seconds bound the search; up to three options are returned.
+  A time-limited search returns verified options found so far with `timeLimitReached`.
   Each connection reports scheduled and available actual/forecast gaps, with
   warnings for insufficient live buffers. Arrivals are limited to 36 hours after
   search start; `minutes` limits only the initial departure window. Uses advertised
