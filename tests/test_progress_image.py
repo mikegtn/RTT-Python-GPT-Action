@@ -143,6 +143,10 @@ class ImageTransportTests(unittest.TestCase):
                 self.assertNotIn('requestEvidence', body)
                 self.assertNotIn('sourceRequestEvidence', body)
                 native = next(c for c in response['content'] if c['type'] == 'image')
+                fallback = response['structuredContent']['imageLinkMarkdown']
+                self.assertTrue(fallback.startswith('[Open schematic](https://'))
+                self.assertTrue(any(fallback in c.get('text', '') and 'fallback link' in c.get('text', '')
+                                    for c in response['content']))
                 public = client.get('/mcp/progress/' + body['schematicId'] + '.png')
                 self.assertEqual(public.status_code, 200)
                 self.assertEqual(public.headers['content-type'], 'image/png')

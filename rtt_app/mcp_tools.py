@@ -471,6 +471,8 @@ def tool_catalog():
                      description="On request, return a PNG schematic of an exact RTT service with its reported station or segment, late sections and current-position glow. Includes progress based on actual movement reports. Omit as_of for current reports; supply an offset-aware historical datetime for replay. Not GPS. Image failures are reported as imageError.")
     schematic["inputSchema"]["properties"].pop("include_image")
     catalog["getServiceSchematic"] = schematic
+    for name in ("getServiceProgress", "getServiceSchematic"):
+        catalog[name]["description"] += " When an image is returned, always include imageLinkMarkdown as a clickable link alongside the inline image; clients may not render the image."
     return catalog
 
 

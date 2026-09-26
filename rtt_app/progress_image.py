@@ -234,5 +234,5 @@ class ProgressImages:
                 'imageWidth': size[0], 'imageHeight': size[1],
                 'imageAlt': alt + '. RTT actual movement reports; not GPS. Schematic, not to scale.',
                 'imageMarkdown': f'![Service progress schematic]({url})',
-                'imageLinkMarkdown': f'[View schematic]({url})',
+                'imageLinkMarkdown': f'[Open schematic]({url})',
                 'imageRetention': 'Public link; retained for up to seven days, subject to a 512-image storage limit.'}
