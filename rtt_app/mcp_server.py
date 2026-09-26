@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import os
+import re
+import secrets
 import time
 
 from mcp import types
@@ -31,6 +33,64 @@ from .tiger_icons import ICONS
 
 LOG = logging.getLogger("rtt.mcp")
 NOAUTH_SCHEMES = [{"type": "noauth"}]
+
+
+async def trace_protocol(handler, scope, receive, send):
+    """Log bounded protocol metadata only; never headers, arguments or results."""
+    request_body, response_body = bytearray(), bytearray()
+    status, response_bytes = None, 0
+    started = time.monotonic()
+
+    async def traced_receive():
+        message = await receive()
+        if message.get("type") == "http.request":
+            request_body.extend(message.get("body", b"")[:max(0, 32769 - len(request_body))])
+        return message
+
+    async def traced_send(message):
+        nonlocal status, response_bytes
+        if message["type"] == "http.response.start":
+            status = message["status"]
+        elif message["type"] == "http.response.body":
+            body = message.get("body", b"")
+            response_bytes += len(body)
+            response_body.extend(body[:max(0, 8193 - len(response_body))])
+        await send(message)
+
+    def label(value):
+        return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_./-]{1,80}", value) else None
+
+    try:
+        await handler(scope, traced_receive, traced_send)
+    finally:
+        record = {"event": "mcp_protocol", "trace": secrets.token_hex(8),
+                  "status": status, "responseBytes": response_bytes,
+                  "durationMs": round((time.monotonic() - started) * 1000)}
+        headers = dict(scope.get("headers", []))
+        record["protocolHeader"] = label(headers.get(b"mcp-protocol-version", b"").decode("ascii", "replace"))
+        try:
+            request = json.loads(request_body)
+            if isinstance(request, dict):
+                record["method"] = label(request.get("method"))
+                record["hasId"] = "id" in request
+                if request.get("method") == "initialize" and isinstance(request.get("params"), dict):
+                    record["offeredVersion"] = label(request["params"].get("protocolVersion"))
+        except (ValueError, UnicodeError):
+            record["invalidJson"] = True
+        try:
+            response = json.loads(response_body) if len(response_body) <= 8192 else None
+            error = response.get("error") if isinstance(response, dict) else None
+            if isinstance(error, dict):
+                record["rpcErrorCode"] = error.get("code") if isinstance(error.get("code"), int) else None
+                message = str(error.get("message", ""))
+                record["errorKind"] = next((kind for prefix, kind in (
+                    ("Bad Request: Unsupported protocol version", "unsupported_protocol"),
+                    ("Validation error", "invalid_request"), ("Parse error", "invalid_json"),
+                    ("Method not found", "unknown_method"),
+                ) if message.startswith(prefix)), "other")
+        except (ValueError, UnicodeError):
+            pass
+        LOG.info(json.dumps(record))
 
 
 class DirectBackend:
@@ -154,7 +214,7 @@ def create_http_app(server, progress_images=None, railway_service=None):
                     headers={"Retry-After": "60"},
                 )(scope, receive, send)
                 return
-            await manager.handle_request(scope, receive, send)
+            await trace_protocol(manager.handle_request, scope, receive, send)
 
     @asynccontextmanager
     async def lifespan(app):

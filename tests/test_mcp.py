@@ -255,6 +255,19 @@ class TransportTests(unittest.TestCase):
         self.headers["Origin"] = "https://attacker.example"
         self.assertEqual(self.rpc("tools/list").status_code, 403)
 
+    def test_protocol_trace_reports_rejection_without_arguments_or_credentials(self):
+        self.headers.update({"MCP-Protocol-Version": "2099-01-01", "Authorization": "Bearer private-test-secret"})
+        with self.assertLogs("rtt.mcp", level="INFO") as logs:
+            response = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {
+                "unique_identity": "private-query-value"}})
+        self.assertEqual(response.status_code, 400)
+        record = json.loads(logs.records[-1].getMessage())
+        self.assertEqual(record["method"], "tools/call")
+        self.assertEqual(record["protocolHeader"], "2099-01-01")
+        self.assertEqual(record["errorKind"], "unsupported_protocol")
+        self.assertNotIn("private-test-secret", str(logs.output))
+        self.assertNotIn("private-query-value", str(logs.output))
+
     def test_public_rate_limit_recovers_in_next_window(self):
         from unittest.mock import patch
         with patch("rtt_app.mcp_server.time.time", return_value=600):
