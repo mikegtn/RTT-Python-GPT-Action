@@ -20,6 +20,26 @@ def service(identity="opaque-rtt-identity", origin="ABD", destination="PLY", dep
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_full_day_search_respects_rtt_duration_and_includes_late_train(self):
+        from datetime import timedelta
+        queries = []
+        late = service("late", "ABD", "PLY", "23:58", "23:59")
+        async def backend(path, params):
+            if path == "/v1/service":
+                return {"ok": True, "result": late}
+            queries.append(params)
+            duration = timestamp(params["time_to"]) - timestamp(params["time_from"])
+            self.assertLessEqual(duration, timedelta(minutes=1439))
+            self.assertNotIn("minutes", params)
+            return {"ok": True, "result": {"services": [] if len(queries) == 1 else [late]}}
+        result = await RailWorkflows(backend).call("findJourneys", {
+            "origin": "ABD", "destination": "PLY", "time_from": "2026-09-19T00:00:00+01:00",
+            "minutes": 1439})
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(queries[0]["time_to"], queries[1]["time_from"])
+        self.assertEqual(result["result"]["itineraries"][0]["legs"][0]["uniqueIdentity"], "late")
+
     def test_rtt_local_times_and_clock_changes(self):
         self.assertEqual(timestamp("2026-09-19T05:57:00"), timestamp("2026-09-19T05:57:00+01:00"))
         with self.assertRaises(ValueError):

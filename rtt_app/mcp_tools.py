@@ -633,14 +633,23 @@ class RailWorkflows:
             key = (a, b, begin, window)
             if key in boards:
                 return boards[key]
-            board = await fetch("/v1/services", {"station": a, "filter_to": b,
-                                "time_from": (begin - timedelta(minutes=1)).astimezone(ZoneInfo("Europe/London")).isoformat(),
-                                "time_to": (begin + timedelta(minutes=window)).astimezone(ZoneInfo("Europe/London")).isoformat(),
-                                "minutes": window,
-                                "movement": "departures", "count": 6})
-            if board is None:
-                return []
-            items = board.get("services") or []
+            # RTT excludes the lower boundary, so retain the one-minute overlap.
+            # Split a maximum-size window instead of exceeding RTT's 23h59m cap.
+            cursor = begin - timedelta(minutes=1)
+            stop = begin + timedelta(minutes=window)
+            items = []
+            while cursor < stop:
+                chunk_end = min(stop, cursor + timedelta(minutes=1439))
+                board = await fetch("/v1/services", {"station": a, "filter_to": b,
+                                    "time_from": cursor.astimezone(ZoneInfo("Europe/London")).isoformat(),
+                                    "time_to": chunk_end.astimezone(ZoneInfo("Europe/London")).isoformat(),
+                                    "movement": "departures", "count": 6})
+                if board is None:
+                    break
+                items.extend(board.get("services") or [])
+                if len(items) >= 6:
+                    break
+                cursor = chunk_end
             coverage.append({"origin": a, "destination": b, "timeFrom": begin.isoformat(),
                              "minutes": window, "candidatesReturned": len(items),
                              "candidateLimit": 6, "possiblyTruncated": len(items) >= 6})
