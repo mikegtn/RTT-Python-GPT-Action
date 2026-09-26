@@ -1,0 +1,35 @@
+name: Plugin preflight
+
+on:
+  push:
+    branches:
+      - plugin-submission-draft
+  pull_request:
+    paths:
+      - "rtt_app/**"
+      - "tests/**"
+      - "deploy/**"
+      - "plugins/realtime-trains/**"
+      - "pyproject.toml"
+      - ".github/workflows/plugin-preflight.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install ".[mcp,snapshots]"
+      - name: Compile Python sources
+        run: python -m compileall -q rtt_app tests deploy
+      - name: Run unit tests
+        run: python -m unittest discover -q

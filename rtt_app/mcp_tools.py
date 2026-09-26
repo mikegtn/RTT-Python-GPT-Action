@@ -1,30 +1,393 @@
-"""MCP tool contracts and bounded workflows over the existing Action API.
+"""MCP tool contracts and bounded workflows over shared railway operations.
 
-The Action remains the authority: opaque identities and request evidence are
-returned unchanged. No upstream credentials are exposed to a model.
+Opaque RTT service identities are preserved exactly. Backend request evidence may
+be used for server-side logging but is not part of the public MCP result contract.
 """
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import secrets
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .action_api import build_openapi_schema
+from .rail_schema import build_openapi_schema
 
 
-def object_schema(properties, required=()):
-    return {"type": "object", "properties": properties, "required": list(required),
-            "additionalProperties": False}
+def object_schema(properties, required=(), *, additional=False):
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(required),
+        "additionalProperties": additional,
+    }
 
 
-IDENTITY = {"type": "string", "minLength": 1, "maxLength": 200,
-            "description": "Exact uniqueIdentity returned by RTT; never construct it."}
+def nullable(schema):
+    return {"anyOf": [deepcopy(schema), {"type": "null"}]}
+
+
+JSON_OBJECT = {"type": "object", "additionalProperties": True}
+JSON_VALUE = {}
+STRING = {"type": "string"}
+STRING_OR_NULL = {"type": ["string", "null"]}
+STRING_ARRAY = {"type": "array", "items": STRING}
+URI_OR_NULL = {"type": ["string", "null"], "format": "uri"}
+
+IDENTITY = {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 200,
+    "description": "Exact uniqueIdentity returned by RTT; never construct it.",
+}
 STATION = {"type": "string", "minLength": 1, "maxLength": 100}
-LEG = object_schema({"unique_identity": IDENTITY, "origin": STATION, "destination": STATION},
-                    ["unique_identity", "origin", "destination"])
+LEG = object_schema(
+    {"unique_identity": IDENTITY, "origin": STATION, "destination": STATION},
+    ["unique_identity", "origin", "destination"],
+)
+
+PAIR = object_schema(
+    {
+        "description": STRING_OR_NULL,
+        "shortCodes": nullable({"type": "array", "items": STRING}),
+        "longCodes": nullable({"type": "array", "items": STRING}),
+        "temporalData": nullable(JSON_OBJECT),
+    },
+    ["description", "shortCodes", "longCodes", "temporalData"],
+)
+
+DEPARTURE = object_schema(
+    {
+        "scheduled": STRING,
+        "expected": STRING,
+        "destination": STRING,
+        "allocation": STRING,
+        "status": STRING,
+        "platform": STRING,
+    },
+    ["scheduled", "expected", "destination", "allocation", "status", "platform"],
+)
+
+SERVICE_SUMMARY = object_schema(
+    {
+        "scheduleMetadata": nullable(JSON_OBJECT),
+        "temporalData": nullable(JSON_OBJECT),
+        "locationMetadata": nullable(JSON_OBJECT),
+        "origin": {"type": "array", "items": PAIR},
+        "destination": {"type": "array", "items": PAIR},
+        "reasons": nullable({"type": "array", "items": JSON_OBJECT}),
+    },
+    ["scheduleMetadata", "temporalData", "locationMetadata", "origin", "destination", "reasons"],
+)
+
+CALL = object_schema(
+    {
+        "location": nullable(JSON_OBJECT),
+        "temporalData": JSON_OBJECT,
+        "locationMetadata": nullable(JSON_OBJECT),
+        "associatedServices": nullable({"type": "array", "items": JSON_OBJECT}),
+    },
+    ["location", "temporalData", "locationMetadata", "associatedServices"],
+)
+
+SERVICE_DETAILS = object_schema(
+    {
+        "scheduleMetadata": nullable(JSON_OBJECT),
+        "origin": {"type": "array", "items": PAIR},
+        "destination": {"type": "array", "items": PAIR},
+        "allocationData": JSON_VALUE,
+        "reasons": nullable({"type": "array", "items": JSON_OBJECT}),
+        "calls": {"type": "array", "items": CALL},
+    },
+    ["scheduleMetadata", "origin", "destination", "allocationData", "reasons", "calls"],
+)
+
+COORDINATE = {
+    "anyOf": [
+        {
+            "type": "array",
+            "prefixItems": [{"type": "number"}, {"type": "number"}],
+            "minItems": 2,
+            "maxItems": 2,
+        },
+        {"type": "null"},
+    ]
+}
+
+ROUTE_CANDIDATE = object_schema(
+    {"tiploc": STRING, "label": STRING_OR_NULL, "coordinate": COORDINATE},
+    ["tiploc", "label", "coordinate"],
+)
+
+ROUTE_RESULT = object_schema(
+    {
+        "origin": STRING,
+        "destination": STRING,
+        "originCode": STRING,
+        "destinationCode": STRING,
+        "mileage": {"type": "number"},
+        "routeBasis": STRING,
+        "candidates": {"type": "array", "items": ROUTE_CANDIDATE},
+        "mapUrl": URI_OR_NULL,
+        "mapImageUrl": {"type": "string", "format": "uri"},
+        "imageAlt": STRING,
+        "snapshotError": STRING,
+        "interactiveMapMarkdown": STRING,
+        "snapshotMarkdown": STRING,
+        "attribution": JSON_VALUE,
+    },
+    additional=True,
+)
+
+JOURNEY_ROUTE_RESULT = object_schema(
+    {
+        "origin": STRING,
+        "destination": STRING,
+        "mileage": {"type": "number"},
+        "routeBasis": STRING,
+        "legs": {"type": "array", "items": JSON_OBJECT},
+        "minimumConnectionTimesVerified": {"type": "boolean"},
+        "routing_warnings": {"type": "array", "items": STRING},
+        "mapUrl": URI_OR_NULL,
+        "schedulePointCount": {"type": "integer", "minimum": 0},
+        "attribution": JSON_VALUE,
+        "mapImageUrl": {"type": "string", "format": "uri"},
+        "imageAlt": STRING,
+        "snapshotError": STRING,
+        "interactiveMapMarkdown": STRING,
+        "snapshotMarkdown": STRING,
+    },
+    additional=False,
+)
+
+MAP_SNAPSHOT_RESULT = object_schema(
+    {
+        "mapUrl": {"type": "string", "format": "uri"},
+        "mapImageUrl": {"type": "string", "format": "uri"},
+        "imageAlt": STRING,
+    },
+    ["mapUrl", "mapImageUrl", "imageAlt"],
+)
+
+API_INFO_RESULT = {
+    "type": "object",
+    "properties": {
+        "version": STRING,
+        "api_version": STRING,
+        "entitlements": JSON_VALUE,
+        "historyRestriction": JSON_VALUE,
+        "historyRestrictToDays": JSON_VALUE,
+        "namespaceRestriction": JSON_VALUE,
+    },
+    "additionalProperties": True,
+}
+
+USAGE_RESULT = object_schema(
+    {
+        "trackingSince": {"type": "string", "format": "date-time"},
+        "lastRequestAt": {"type": ["string", "null"], "format": "date-time"},
+        "totalRequests": {"type": "integer", "minimum": 0},
+        "requestsByEndpoint": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0},
+        },
+        "responsesByStatus": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0},
+        },
+    },
+    ["trackingSince", "lastRequestAt", "totalRequests", "requestsByEndpoint", "responsesByStatus"],
+)
+
+PASSENGER_LEG = object_schema(
+    {
+        "uniqueIdentity": IDENTITY,
+        "origin": STATION,
+        "destination": STATION,
+        "departure": JSON_OBJECT,
+        "arrival": JSON_OBJECT,
+        "originLocationMetadata": JSON_VALUE,
+        "destinationLocationMetadata": JSON_VALUE,
+        "allocationData": JSON_VALUE,
+    },
+    [
+        "uniqueIdentity", "origin", "destination", "departure", "arrival",
+        "originLocationMetadata", "destinationLocationMetadata", "allocationData",
+    ],
+)
+
+ITINERARY = object_schema(
+    {
+        "legs": {"type": "array", "minItems": 1, "maxItems": 4, "items": PASSENGER_LEG},
+        "changes": {"type": "integer", "minimum": 0, "maximum": 3},
+        "connections": {"type": "array", "maxItems": 3, "items": object_schema({
+            "station": STATION, "scheduledMinutes": {"type": "number"},
+            "latestMinutes": {"type": ["number", "null"]},
+            "minimumConnectionTimeVerified": {"type": "boolean"},
+        }, ["station", "scheduledMinutes", "latestMinutes", "minimumConnectionTimeVerified"])},
+        "connectionMinutes": {"type": "number"},
+        "warnings": STRING_ARRAY,
+    },
+    ["legs", "warnings"],
+)
+
+COVERAGE = object_schema(
+    {
+        "origin": STATION,
+        "destination": STATION,
+        "timeFrom": {"type": "string", "format": "date-time"},
+        "minutes": {"type": "integer", "minimum": 1},
+        "candidatesReturned": {"type": "integer", "minimum": 0},
+        "candidateLimit": {"type": "integer", "minimum": 1},
+        "possiblyTruncated": {"type": "boolean"},
+    },
+    [
+        "origin", "destination", "timeFrom", "minutes", "candidatesReturned",
+        "candidateLimit", "possiblyTruncated",
+    ],
+)
+
+FIND_JOURNEYS_RESULT = object_schema(
+    {
+        "origin": STATION,
+        "destination": STATION,
+        "timeFrom": {"type": "string", "format": "date-time"},
+        "timeTo": {"type": "string", "format": "date-time"},
+        "itineraries": {"type": "array", "maxItems": 3, "items": ITINERARY},
+        "matchedOptions": {"type": "integer", "minimum": 0},
+        "coverage": {"type": "array", "items": COVERAGE},
+        "connectionBufferMinutes": {"type": "integer", "minimum": 1},
+        "maxChanges": {"type": "integer", "minimum": 0, "maximum": 3},
+        "backendRequests": {"type": "integer", "minimum": 0},
+        "requestLimit": {"type": "integer", "minimum": 1},
+        "requestLimitReached": {"type": "boolean"},
+        "frontierLimit": {"type": "integer", "minimum": 1},
+        "frontierTruncated": {"type": "boolean"},
+        "timeLimitSeconds": {"type": "integer", "minimum": 1},
+        "timeLimitReached": {"type": "boolean"},
+        "timeZone": STRING,
+        "minimumConnectionTimesVerified": {"type": "boolean"},
+        "coverageLimit": STRING,
+    },
+    [
+        "origin", "destination", "timeFrom", "timeTo", "itineraries",
+        "matchedOptions", "coverage", "connectionBufferMinutes", "timeZone",
+        "minimumConnectionTimesVerified", "coverageLimit",
+    ],
+)
+
+LAST_REPORT = object_schema(
+    {
+        "location": nullable(JSON_OBJECT),
+        "event": {"type": "string", "enum": ["arrival", "pass", "departure"]},
+        "reportedAt": {"type": "string"},
+        "timing": JSON_OBJECT,
+    },
+    ["location", "event", "reportedAt", "timing"],
+)
+
+TRAIN_LOCATION_RESULT = object_schema(
+    {
+        "uniqueIdentity": IDENTITY,
+        "lastReport": nullable(LAST_REPORT),
+        "retrievedAt": {"type": "string", "format": "date-time"},
+        "positionBasis": STRING,
+        "timeZone": STRING,
+        "reportAgeSeconds": {"type": ["integer", "null"], "minimum": 0},
+        "warnings": STRING_ARRAY,
+    },
+    [
+        "uniqueIdentity", "lastReport", "retrievedAt", "positionBasis",
+        "timeZone", "reportAgeSeconds", "warnings",
+    ],
+)
+
+ROUTE_DETAILS_RESULT = object_schema(
+    {
+        "uniqueIdentity": IDENTITY,
+        "scheduleMetadata": nullable(JSON_OBJECT),
+        "calls": {"type": "array", "items": CALL},
+        "origin": {"type": "array", "items": PAIR},
+        "destination": {"type": "array", "items": PAIR},
+        "reasons": nullable({"type": "array", "items": JSON_OBJECT}),
+        "routeBasis": STRING,
+    },
+    ["uniqueIdentity", "scheduleMetadata", "calls", "origin", "destination", "reasons", "routeBasis"],
+)
+
+PROGRESS_POINT = object_schema({
+    "callIndex": {"type": "integer", "minimum": 0}, "name": STRING_OR_NULL,
+    "location": nullable(JSON_OBJECT),
+    **{prefix + event: STRING_OR_NULL for prefix in ("scheduled", "scheduledInternal", "actual")
+       for event in ("Arrival", "Departure")},
+}, ["callIndex", "name", "location"])
+
+SERVICE_PROGRESS_RESULT = object_schema({
+    "uniqueIdentity": IDENTITY,
+    "state": {"type": "string", "enum": ["not_started", "at_station", "between_calls", "completed"]},
+    "evaluatedAt": {"type": "string", "format": "date-time"},
+    "retrievedAt": {"type": "string", "format": "date-time"},
+    "lastReport": nullable(object_schema({
+        "callIndex": {"type": "integer", "minimum": 0}, "location": nullable(JSON_OBJECT),
+        "event": {"type": "string", "enum": ["arrival", "pass", "departure"]},
+        "reportedAt": STRING,
+    }, ["callIndex", "location", "event", "reportedAt"])),
+    "latenessMinutes": {"type": ["number", "null"]},
+    "departureLatenessMinutes": {"type": ["number", "null"]},
+    "latenessBasis": STRING, "positionBasis": STRING, "timeZone": STRING,
+    "reportAgeSeconds": {"type": "integer", "minimum": 0}, "warnings": STRING_ARRAY,
+    "at": PROGRESS_POINT, "from": PROGRESS_POINT, "to": PROGRESS_POINT,
+    "schematicId": STRING, "imageUrl": {"type": "string", "format": "uri"},
+    "imageMimeType": {"const": "image/png"},
+    "imageWidth": {"type": "integer", "minimum": 1},
+    "imageHeight": {"type": "integer", "minimum": 1},
+    "imageAlt": STRING, "imageMarkdown": STRING, "imageLinkMarkdown": STRING,
+    "imageRetention": STRING, "imageError": STRING,
+}, ["uniqueIdentity", "state", "evaluatedAt", "retrievedAt", "lastReport",
+    "latenessMinutes", "positionBasis", "timeZone", "warnings"])
+
+RESULT_SCHEMAS = {
+    "getServiceProgress": SERVICE_PROGRESS_RESULT,
+    "getServiceSchematic": SERVICE_PROGRESS_RESULT,
+    "getNextDepartures": object_schema(
+        {
+            "station": STRING,
+            "stationCode": STRING,
+            "departures": {"type": "array", "items": DEPARTURE},
+        },
+        ["station", "stationCode", "departures"],
+    ),
+    "searchStationServices": object_schema(
+        {
+            "query": JSON_VALUE,
+            "systemStatus": JSON_VALUE,
+            "services": {"type": "array", "items": SERVICE_SUMMARY},
+        },
+        ["query", "systemStatus", "services"],
+    ),
+    "getServiceDetails": SERVICE_DETAILS,
+    "getRttApiInfo": API_INFO_RESULT,
+    "getApiUsage": USAGE_RESULT,
+    "suggestRailRoute": ROUTE_RESULT,
+    "getJourneyRoute": JOURNEY_ROUTE_RESULT,
+    "getRailMapSnapshot": MAP_SNAPSHOT_RESULT,
+    "findJourneys": FIND_JOURNEYS_RESULT,
+    "getTrainLocation": TRAIN_LOCATION_RESULT,
+    "getRouteDetails": ROUTE_DETAILS_RESULT,
+}
+
+
+def _operation_result_schema(operation):
+    """Reuse a detailed Action schema when that endpoint already defines one."""
+    try:
+        response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        result = response["properties"]["result"]
+    except (KeyError, TypeError):
+        return None
+    return deepcopy(result)
 
 
 def tool_catalog():
@@ -44,18 +407,37 @@ def tool_catalog():
         if operation["operationId"] == "getJourneyRoute":
             properties["legs"] = {"type": "array", "minItems": 1, "maxItems": 6, "items": LEG}
         creates_map = path in {"/v1/route", "/v1/journey-route", "/v1/map-snapshot"}
+        result_schema = RESULT_SCHEMAS.get(operation["operationId"]) or _operation_result_schema(operation)
+        if result_schema is None:
+            raise ValueError(f"No public output schema for {operation['operationId']}")
         catalog[operation["operationId"]] = {
-            "name": operation["operationId"], "title": operation["summary"],
-            "description": operation["description"], "inputSchema": object_schema(properties, required),
-            "outputSchema": {"type": "object", "properties": {"ok": {"type": "boolean"}},
-                             "required": ["ok"], "additionalProperties": True},
-            "annotations": {"readOnlyHint": not creates_map, "destructiveHint": False,
-                            "idempotentHint": not creates_map, "openWorldHint": True},
+            "name": operation["operationId"],
+            "title": operation["summary"],
+            "description": operation["description"],
+            "inputSchema": object_schema(properties, required),
+            "outputSchema": result_schema,
+            "annotations": {
+                "readOnlyHint": not creates_map,
+                "destructiveHint": False,
+                "idempotentHint": not creates_map,
+                "openWorldHint": True,
+            },
             "path": path,
         }
+
     additions = [
+        ("getServiceProgress", "Get passenger-friendly service progress",
+         "Derive not_started, at_station, between_calls or completed from actual, non-interpolated RTT movement reports only. "
+         "Optional as_of replays event times from today's service record, not what was known historically. "
+         "Reports are not GPS; missing or contradictory evidence returns an error rather than a guessed state.",
+         object_schema({"unique_identity": IDENTITY,
+                        "include_image": {"type": "boolean", "default": False,
+                                          "description": "On explicit request, create a passenger-stop PNG schematic and return a public image URL. Segment marker is symbolic, not GPS or distance along the line."},
+                        "as_of": {"type": "string", "format": "date-time",
+                                  "description": "Optional ISO datetime with explicit UTC offset; inclusive event cutoff."}},
+                       ["unique_identity"])),
         ("findJourneys", "Find dated passenger journeys",
-         "Search direct trains and up to three supplied interchange stations. Inspect exact RTT services, "
+         "Search direct trains and journeys with up to three changes among supplied interchange stations. The stations are candidates, not mandatory ordered vias. Inspect exact RTT services, "
          "advertised times, restrictions and cancellations. Bounded search, not a complete journey planner; "
          "minimum interchange times are not verified. Returns up to three options and coverage limits.",
          object_schema({"origin": STATION, "destination": STATION,
@@ -64,6 +446,7 @@ def tool_catalog():
                         "minutes": {"type": "integer", "minimum": 1, "maximum": 1439, "default": 720},
                         "interchanges": {"type": "array", "maxItems": 3, "uniqueItems": True,
                                          "items": STATION, "default": []},
+                        "max_changes": {"type": "integer", "minimum": 0, "maximum": 3, "default": 3},
                         "connection_minutes": {"type": "integer", "minimum": 1, "maximum": 180,
                                                "default": 15,
                                                "description": "Search buffer, not a verified minimum interchange time."}},
@@ -79,10 +462,17 @@ def tool_catalog():
     ]
     for name, title, description, schema in additions:
         catalog[name] = {"name": name, "title": title, "description": description, "inputSchema": schema,
-                         "outputSchema": {"type": "object", "required": ["ok"],
-                                          "properties": {"ok": {"type": "boolean"}}, "additionalProperties": True},
+                         "outputSchema": deepcopy(RESULT_SCHEMAS[name]),
                          "annotations": {"readOnlyHint": True, "destructiveHint": False,
                                          "idempotentHint": True, "openWorldHint": True}}
+    catalog["getServiceProgress"]["annotations"].update(readOnlyHint=False, idempotentHint=False)
+    schematic = deepcopy(catalog["getServiceProgress"])
+    schematic.update(name="getServiceSchematic", title="Show a service progress schematic",
+                     description="On request, return a PNG schematic of an exact RTT service with its reported station or segment, late sections and current-position glow. Includes progress based on actual movement reports. Omit as_of for current reports; supply an offset-aware historical datetime for replay. Not GPS. Image failures are reported as imageError.")
+    schematic["inputSchema"]["properties"].pop("include_image")
+    catalog["getServiceSchematic"] = schematic
+    for name in ("getServiceProgress", "getServiceSchematic"):
+        catalog[name]["description"] += " When an image is returned, always include imageLinkMarkdown as a clickable link alongside the inline image; clients may not render the image."
     return catalog
 
 
@@ -147,8 +537,9 @@ def passenger_leg(service, identity, origin, destination):
 
 
 class RailWorkflows:
-    def __init__(self, backend):
+    def __init__(self, backend, progress_images=None):
         self.backend = backend
+        self.progress_images = progress_images
         self.catalog = tool_catalog()
 
     async def call(self, name: str, arguments: dict[str, Any]):
@@ -182,6 +573,17 @@ class RailWorkflows:
                               "calls": service.get("calls", []), "origin": service.get("origin"),
                               "destination": service.get("destination"), "reasons": service.get("reasons"),
                               "routeBasis": "Ordered RTT service-detail timing points; no geometry or mileage inferred"}
+                elif name in {"getServiceProgress", "getServiceSchematic"}:
+                    from .service_progress import service_progress
+                    result = service_progress(service, identity, arguments.get("as_of"))
+                    if name == "getServiceSchematic" or arguments.get("include_image"):
+                        if self.progress_images is None:
+                            result["imageError"] = "Service schematic images are not configured on this server"
+                        else:
+                            try:
+                                result.update(await asyncio.to_thread(self.progress_images.create, service, result))
+                            except (OSError, ValueError, ImportError):
+                                result["imageError"] = "Service schematic image could not be generated; progress evidence remains available"
                 else:
                     now = datetime.now(timezone.utc)
                     reports = []
@@ -209,59 +611,149 @@ class RailWorkflows:
         return body
 
     async def find_journeys(self, request, origin, destination, time_from, minutes=720,
-                            interchanges=None, connection_minutes=15):
+                            interchanges=None, connection_minutes=15, max_changes=3):
         start = timestamp(time_from, require_offset=True)
         end = start + timedelta(minutes=minutes)
-        interchanges = interchanges or []
-        cache, coverage, options = {}, [], []
-        # Six candidates per board bounds upstream work. Every limit is disclosed.
+        if not 0 <= max_changes <= 3 or not 1 <= minutes <= 1439 or not 1 <= connection_minutes <= 180:
+            raise ValueError("Invalid journey search limits")
+        normalize = lambda value: value.strip().casefold()
+        nodes = list(dict.fromkeys(normalize(s) for s in (interchanges or [])))
+        if len(nodes) > 3 or normalize(origin) == normalize(destination):
+            raise ValueError("Supply distinct endpoints and at most three interchange stations")
+        nodes = [s for s in nodes if s not in {normalize(origin), normalize(destination)}]
+        cache, boards, coverage, options = {}, {}, [], []
+        requests_used, budget_hit, frontier_cut = 0, False, False
+        time_limit, time_limit_hit = 150, False
+        deadline = monotonic() + time_limit
+        request_limit, frontier_limit = 96, 18
+        horizon = start + timedelta(hours=36)
+
+        async def fetch(path, params):
+            nonlocal requests_used, budget_hit, time_limit_hit
+            remaining = deadline - monotonic()
+            if remaining <= 0 or time_limit_hit:
+                time_limit_hit = True
+                return None
+            if requests_used >= request_limit:
+                budget_hit = True
+                return None
+            requests_used += 1
+            try:
+                return await asyncio.wait_for(request(path, params), timeout=remaining)
+            except TimeoutError:
+                time_limit_hit = True
+                return None
+
         async def legs(a, b, begin, window):
-            board = await request("/v1/services", {"station": a, "filter_to": b,
-                                  "time_from": begin.isoformat(), "minutes": window,
-                                  "movement": "departures", "count": 6})
-            items = board.get("services") or []
+            key = (a, b, begin, window)
+            if key in boards:
+                return boards[key]
+            # RTT excludes the lower boundary, so retain the one-minute overlap.
+            # Split a maximum-size window instead of exceeding RTT's 23h59m cap.
+            cursor = begin - timedelta(minutes=1)
+            stop = begin + timedelta(minutes=window)
+            items = []
+            while cursor < stop:
+                chunk_end = min(stop, cursor + timedelta(minutes=1439))
+                board = await fetch("/v1/services", {"station": a, "filter_to": b,
+                                    "time_from": cursor.astimezone(ZoneInfo("Europe/London")).isoformat(),
+                                    "time_to": chunk_end.astimezone(ZoneInfo("Europe/London")).isoformat(),
+                                    "movement": "departures", "count": 6})
+                if board is None:
+                    break
+                items.extend(board.get("services") or [])
+                if len(items) >= 6:
+                    break
+                cursor = chunk_end
             coverage.append({"origin": a, "destination": b, "timeFrom": begin.isoformat(),
                              "minutes": window, "candidatesReturned": len(items),
                              "candidateLimit": 6, "possiblyTruncated": len(items) >= 6})
-            result = []
-            for item in items:
+            result, seen = [], set()
+            for item in items[:6]:
                 identity = (item.get("scheduleMetadata") or {}).get("uniqueIdentity")
-                if not identity:
+                if not identity or identity in seen:
                     continue
+                seen.add(identity)
                 if identity not in cache:
-                    cache[identity] = await request("/v1/service", {"unique_identity": identity})
+                    data = await fetch("/v1/service", {"unique_identity": identity})
+                    if data is None:
+                        break
+                    cache[identity] = data
                 leg = passenger_leg(cache[identity], identity, a, b)
                 if leg and begin <= timestamp(leg["departure"]["scheduleAdvertised"]) < begin + timedelta(minutes=window):
-                    result.append(leg)
+                    if timestamp(leg["arrival"]["scheduleAdvertised"]) <= horizon:
+                        result.append(leg)
+            boards[key] = result
             return result
 
-        for leg in await legs(origin, destination, start, minutes):
-            options.append({"legs": [leg], "warnings": []})
-        for interchange in interchanges:
-            first = await legs(origin, interchange, start, minutes)
-            if not first:
-                continue
-            earliest = min(timestamp(l["arrival"]["scheduleAdvertised"]) for l in first)
-            onward = await legs(interchange, destination, earliest, 1439)
-            for a in first:
-                for b in onward:
-                    if a["uniqueIdentity"] == b["uniqueIdentity"]:
-                        continue
-                    gap = (timestamp(b["departure"]["scheduleAdvertised"]) - timestamp(a["arrival"]["scheduleAdvertised"])).total_seconds() / 60
-                    if not connection_minutes <= gap <= 240:
-                        continue
-                    warnings = ["Minimum interchange time has not been verified; the buffer is a search assumption."]
-                    latest_a = a["arrival"].get("realtimeActual") or a["arrival"].get("realtimeForecast")
-                    latest_b = b["departure"].get("realtimeActual") or b["departure"].get("realtimeForecast")
-                    if latest_a and latest_b and (timestamp(latest_b) - timestamp(latest_a)).total_seconds() < connection_minutes * 60:
-                        warnings.append("Latest running times do not allow the assumed connection buffer.")
-                    options.append({"legs": [a, b], "connectionMinutes": gap, "warnings": warnings})
-        options.sort(key=lambda o: timestamp(o["legs"][-1]["arrival"]["scheduleAdvertised"]))
+        # Breadth-first bounded search: destination first at each state, then
+        # unvisited candidate stations. Never reuse a train or interchange.
+        frontier = [([], {normalize(origin)}, [], [])]
+        seen_options = set()
+        for depth in range(max_changes + 1):
+            following = []
+            for route, visited, connections, warnings in frontier:
+                a = route[-1]["destination"] if route else origin
+                arrival = timestamp(route[-1]["arrival"]["scheduleAdvertised"]) if route else None
+                begin = arrival + timedelta(minutes=connection_minutes) if route else start
+                window = 241 - connection_minutes if route else minutes
+                targets = [destination] + ([s.upper() for s in nodes if s not in visited]
+                                           if depth < max_changes else [])
+                for b in targets:
+                    for leg in await legs(a, b, begin, window):
+                        if any(old["uniqueIdentity"] == leg["uniqueIdentity"] for old in route):
+                            continue
+                        new_connections, new_warnings = list(connections), list(warnings)
+                        if route:
+                            gap = (timestamp(leg["departure"]["scheduleAdvertised"]) - arrival).total_seconds() / 60
+                            if not connection_minutes <= gap <= 240:
+                                continue
+                            latest_a = route[-1]["arrival"].get("realtimeActual") or route[-1]["arrival"].get("realtimeForecast")
+                            latest_b = leg["departure"].get("realtimeActual") or leg["departure"].get("realtimeForecast")
+                            latest_gap = ((timestamp(latest_b) - timestamp(latest_a)).total_seconds() / 60
+                                          if latest_a and latest_b else None)
+                            new_connections.append({"station": a, "scheduledMinutes": gap,
+                                                    "latestMinutes": latest_gap,
+                                                    "minimumConnectionTimeVerified": False})
+                            if latest_gap is not None and latest_gap < connection_minutes:
+                                new_warnings.append(f"Latest running times at {a} do not allow the assumed connection buffer.")
+                        new_route = route + [leg]
+                        if normalize(b) == normalize(destination):
+                            signature = tuple((l["uniqueIdentity"], l["origin"], l["destination"]) for l in new_route)
+                            if signature in seen_options:
+                                continue
+                            seen_options.add(signature)
+                            option = {"legs": new_route, "changes": len(new_connections),
+                                      "connections": new_connections,
+                                      "warnings": (["Minimum interchange time has not been verified; the buffer is a search assumption."]
+                                                   if new_connections else []) + new_warnings}
+                            if len(new_connections) == 1:
+                                option["connectionMinutes"] = new_connections[0]["scheduledMinutes"]
+                            options.append(option)
+                        else:
+                            following.append((new_route, visited | {normalize(b)}, new_connections, new_warnings))
+                    if budget_hit or time_limit_hit:
+                        break
+                if budget_hit or time_limit_hit:
+                    break
+            if budget_hit or time_limit_hit:
+                break
+            following.sort(key=lambda state: timestamp(state[0][-1]["arrival"]["scheduleAdvertised"]))
+            frontier_cut |= len(following) > frontier_limit
+            frontier = following[:frontier_limit]
+            if not frontier:
+                break
+        options.sort(key=lambda o: (timestamp(o["legs"][-1]["arrival"]["scheduleAdvertised"]), o["changes"]))
         return {"origin": origin, "destination": destination, "timeFrom": start.isoformat(),
                 "timeTo": end.isoformat(), "itineraries": options[:3], "matchedOptions": len(options),
                 "coverage": coverage, "connectionBufferMinutes": connection_minutes,
+                "maxChanges": max_changes, "backendRequests": requests_used,
+                "requestLimit": request_limit, "requestLimitReached": budget_hit,
+                "frontierLimit": frontier_limit, "frontierTruncated": frontier_cut,
+                "timeLimitSeconds": time_limit, "timeLimitReached": time_limit_hit,
                 "timeZone": "Europe/London for RTT timestamps without an explicit offset",
                 "minimumConnectionTimesVerified": False,
-                "coverageLimit": "Direct and supplied single-interchange routes only; six candidates per board, "
-                                 "onward search under 24 hours, waits at most four hours. Not exhaustive; "
+                "coverageLimit": "Up to three changes among supplied candidate stations; six candidates per board, "
+                                 "18 partial journeys per depth, 96 backend requests, 150 seconds, arrivals within 36 hours of search start, "
+                                 "waits at most four hours. timeTo limits the initial departure only. Not exhaustive; "
                                  "no claim of fastest, earliest or only service. Live data can change."}
