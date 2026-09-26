@@ -50,6 +50,9 @@ if '# TrainBrain public pages' not in text:
 '''
     text=text.replace(marker,block+marker)
     p.write_text(text)
+if 'Alias /privacy /var/www/rail-public/current/privacy.html' not in text:
+    text=text.replace('    # TrainBrain public pages', '    ProxyPass /privacy !\n    Alias /privacy /var/www/rail-public/current/privacy.html\n    # TrainBrain public pages')
+    p.write_text(text)
 PY
 apache2ctl configtest
 systemctl reload apache2
