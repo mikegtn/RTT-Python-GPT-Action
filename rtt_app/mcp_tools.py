@@ -1,7 +1,7 @@
 """MCP tool contracts and bounded workflows over shared railway operations.
 
-RTT remains the authority: opaque identities and request evidence are
-returned unchanged. No upstream credentials are exposed to a model.
+Opaque RTT service identities are preserved exactly. Backend request evidence may
+be used for server-side logging but is not part of the public MCP result contract.
 """
 from __future__ import annotations
 
@@ -16,16 +16,375 @@ from zoneinfo import ZoneInfo
 from .rail_schema import build_openapi_schema
 
 
-def object_schema(properties, required=()):
-    return {"type": "object", "properties": properties, "required": list(required),
-            "additionalProperties": False}
+def object_schema(properties, required=(), *, additional=False):
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(required),
+        "additionalProperties": additional,
+    }
 
 
-IDENTITY = {"type": "string", "minLength": 1, "maxLength": 200,
-            "description": "Exact uniqueIdentity returned by RTT; never construct it."}
+def nullable(schema):
+    return {"anyOf": [deepcopy(schema), {"type": "null"}]}
+
+
+JSON_OBJECT = {"type": "object", "additionalProperties": True}
+JSON_VALUE = {}
+STRING = {"type": "string"}
+STRING_OR_NULL = {"type": ["string", "null"]}
+STRING_ARRAY = {"type": "array", "items": STRING}
+URI_OR_NULL = {"type": ["string", "null"], "format": "uri"}
+
+IDENTITY = {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 200,
+    "description": "Exact uniqueIdentity returned by RTT; never construct it.",
+}
 STATION = {"type": "string", "minLength": 1, "maxLength": 100}
-LEG = object_schema({"unique_identity": IDENTITY, "origin": STATION, "destination": STATION},
-                    ["unique_identity", "origin", "destination"])
+LEG = object_schema(
+    {"unique_identity": IDENTITY, "origin": STATION, "destination": STATION},
+    ["unique_identity", "origin", "destination"],
+)
+
+PAIR = object_schema(
+    {
+        "description": STRING_OR_NULL,
+        "shortCodes": nullable({"type": "array", "items": STRING}),
+        "longCodes": nullable({"type": "array", "items": STRING}),
+        "temporalData": nullable(JSON_OBJECT),
+    },
+    ["description", "shortCodes", "longCodes", "temporalData"],
+)
+
+DEPARTURE = object_schema(
+    {
+        "scheduled": STRING,
+        "expected": STRING,
+        "destination": STRING,
+        "allocation": STRING,
+        "status": STRING,
+        "platform": STRING,
+    },
+    ["scheduled", "expected", "destination", "allocation", "status", "platform"],
+)
+
+SERVICE_SUMMARY = object_schema(
+    {
+        "scheduleMetadata": nullable(JSON_OBJECT),
+        "temporalData": nullable(JSON_OBJECT),
+        "locationMetadata": nullable(JSON_OBJECT),
+        "origin": {"type": "array", "items": PAIR},
+        "destination": {"type": "array", "items": PAIR},
+        "reasons": nullable({"type": "array", "items": JSON_OBJECT}),
+    },
+    ["scheduleMetadata", "temporalData", "locationMetadata", "origin", "destination", "reasons"],
+)
+
+CALL = object_schema(
+    {
+        "location": nullable(JSON_OBJECT),
+        "temporalData": JSON_OBJECT,
+        "locationMetadata": nullable(JSON_OBJECT),
+        "associatedServices": nullable({"type": "array", "items": JSON_OBJECT}),
+    },
+    ["location", "temporalData", "locationMetadata", "associatedServices"],
+)
+
+SERVICE_DETAILS = object_schema(
+    {
+        "scheduleMetadata": nullable(JSON_OBJECT),
+        "origin": {"type": "array", "items": PAIR},
+        "destination": {"type": "array", "items": PAIR},
+        "allocationData": JSON_VALUE,
+        "reasons": nullable({"type": "array", "items": JSON_OBJECT}),
+        "calls": {"type": "array", "items": CALL},
+    },
+    ["scheduleMetadata", "origin", "destination", "allocationData", "reasons", "calls"],
+)
+
+COORDINATE = {
+    "anyOf": [
+        {
+            "type": "array",
+            "prefixItems": [{"type": "number"}, {"type": "number"}],
+            "minItems": 2,
+            "maxItems": 2,
+        },
+        {"type": "null"},
+    ]
+}
+
+ROUTE_CANDIDATE = object_schema(
+    {"tiploc": STRING, "label": STRING_OR_NULL, "coordinate": COORDINATE},
+    ["tiploc", "label", "coordinate"],
+)
+
+ROUTE_RESULT = object_schema(
+    {
+        "origin": STRING,
+        "destination": STRING,
+        "originCode": STRING,
+        "destinationCode": STRING,
+        "mileage": {"type": "number"},
+        "routeBasis": STRING,
+        "candidates": {"type": "array", "items": ROUTE_CANDIDATE},
+        "mapUrl": URI_OR_NULL,
+        "mapImageUrl": {"type": "string", "format": "uri"},
+        "imageAlt": STRING,
+        "snapshotError": STRING,
+        "interactiveMapMarkdown": STRING,
+        "snapshotMarkdown": STRING,
+        "attribution": JSON_VALUE,
+    },
+    additional=True,
+)
+
+JOURNEY_ROUTE_RESULT = object_schema(
+    {
+        "origin": STRING,
+        "destination": STRING,
+        "mileage": {"type": "number"},
+        "routeBasis": STRING,
+        "legs": {"type": "array", "items": JSON_OBJECT},
+        "minimumConnectionTimesVerified": {"type": "boolean"},
+        "routing_warnings": {"type": "array", "items": STRING},
+        "mapUrl": URI_OR_NULL,
+        "schedulePointCount": {"type": "integer", "minimum": 0},
+        "attribution": JSON_VALUE,
+        "mapImageUrl": {"type": "string", "format": "uri"},
+        "imageAlt": STRING,
+        "snapshotError": STRING,
+        "interactiveMapMarkdown": STRING,
+        "snapshotMarkdown": STRING,
+    },
+    additional=False,
+)
+
+MAP_SNAPSHOT_RESULT = object_schema(
+    {
+        "mapUrl": {"type": "string", "format": "uri"},
+        "mapImageUrl": {"type": "string", "format": "uri"},
+        "imageAlt": STRING,
+    },
+    ["mapUrl", "mapImageUrl", "imageAlt"],
+)
+
+API_INFO_RESULT = {
+    "type": "object",
+    "properties": {
+        "version": STRING,
+        "api_version": STRING,
+        "entitlements": JSON_VALUE,
+        "historyRestriction": JSON_VALUE,
+        "historyRestrictToDays": JSON_VALUE,
+        "namespaceRestriction": JSON_VALUE,
+    },
+    "additionalProperties": True,
+}
+
+USAGE_RESULT = object_schema(
+    {
+        "trackingSince": {"type": "string", "format": "date-time"},
+        "lastRequestAt": {"type": ["string", "null"], "format": "date-time"},
+        "totalRequests": {"type": "integer", "minimum": 0},
+        "requestsByEndpoint": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0},
+        },
+        "responsesByStatus": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0},
+        },
+    },
+    ["trackingSince", "lastRequestAt", "totalRequests", "requestsByEndpoint", "responsesByStatus"],
+)
+
+PASSENGER_LEG = object_schema(
+    {
+        "uniqueIdentity": IDENTITY,
+        "origin": STATION,
+        "destination": STATION,
+        "departure": JSON_OBJECT,
+        "arrival": JSON_OBJECT,
+        "originLocationMetadata": JSON_VALUE,
+        "destinationLocationMetadata": JSON_VALUE,
+        "allocationData": JSON_VALUE,
+    },
+    [
+        "uniqueIdentity", "origin", "destination", "departure", "arrival",
+        "originLocationMetadata", "destinationLocationMetadata", "allocationData",
+    ],
+)
+
+ITINERARY = object_schema(
+    {
+        "legs": {"type": "array", "minItems": 1, "maxItems": 4, "items": PASSENGER_LEG},
+        "changes": {"type": "integer", "minimum": 0, "maximum": 3},
+        "connections": {"type": "array", "maxItems": 3, "items": object_schema({
+            "station": STATION, "scheduledMinutes": {"type": "number"},
+            "latestMinutes": {"type": ["number", "null"]},
+            "minimumConnectionTimeVerified": {"type": "boolean"},
+        }, ["station", "scheduledMinutes", "latestMinutes", "minimumConnectionTimeVerified"])},
+        "connectionMinutes": {"type": "number"},
+        "warnings": STRING_ARRAY,
+    },
+    ["legs", "warnings"],
+)
+
+COVERAGE = object_schema(
+    {
+        "origin": STATION,
+        "destination": STATION,
+        "timeFrom": {"type": "string", "format": "date-time"},
+        "minutes": {"type": "integer", "minimum": 1},
+        "candidatesReturned": {"type": "integer", "minimum": 0},
+        "candidateLimit": {"type": "integer", "minimum": 1},
+        "possiblyTruncated": {"type": "boolean"},
+    },
+    [
+        "origin", "destination", "timeFrom", "minutes", "candidatesReturned",
+        "candidateLimit", "possiblyTruncated",
+    ],
+)
+
+FIND_JOURNEYS_RESULT = object_schema(
+    {
+        "origin": STATION,
+        "destination": STATION,
+        "timeFrom": {"type": "string", "format": "date-time"},
+        "timeTo": {"type": "string", "format": "date-time"},
+        "itineraries": {"type": "array", "maxItems": 3, "items": ITINERARY},
+        "matchedOptions": {"type": "integer", "minimum": 0},
+        "coverage": {"type": "array", "items": COVERAGE},
+        "connectionBufferMinutes": {"type": "integer", "minimum": 1},
+        "maxChanges": {"type": "integer", "minimum": 0, "maximum": 3},
+        "backendRequests": {"type": "integer", "minimum": 0},
+        "requestLimit": {"type": "integer", "minimum": 1},
+        "requestLimitReached": {"type": "boolean"},
+        "frontierLimit": {"type": "integer", "minimum": 1},
+        "frontierTruncated": {"type": "boolean"},
+        "timeZone": STRING,
+        "minimumConnectionTimesVerified": {"type": "boolean"},
+        "coverageLimit": STRING,
+    },
+    [
+        "origin", "destination", "timeFrom", "timeTo", "itineraries",
+        "matchedOptions", "coverage", "connectionBufferMinutes", "timeZone",
+        "minimumConnectionTimesVerified", "coverageLimit",
+    ],
+)
+
+LAST_REPORT = object_schema(
+    {
+        "location": nullable(JSON_OBJECT),
+        "event": {"type": "string", "enum": ["arrival", "pass", "departure"]},
+        "reportedAt": {"type": "string"},
+        "timing": JSON_OBJECT,
+    },
+    ["location", "event", "reportedAt", "timing"],
+)
+
+TRAIN_LOCATION_RESULT = object_schema(
+    {
+        "uniqueIdentity": IDENTITY,
+        "lastReport": nullable(LAST_REPORT),
+        "retrievedAt": {"type": "string", "format": "date-time"},
+        "positionBasis": STRING,
+        "timeZone": STRING,
+        "reportAgeSeconds": {"type": ["integer", "null"], "minimum": 0},
+        "warnings": STRING_ARRAY,
+    },
+    [
+        "uniqueIdentity", "lastReport", "retrievedAt", "positionBasis",
+        "timeZone", "reportAgeSeconds", "warnings",
+    ],
+)
+
+ROUTE_DETAILS_RESULT = object_schema(
+    {
+        "uniqueIdentity": IDENTITY,
+        "scheduleMetadata": nullable(JSON_OBJECT),
+        "calls": {"type": "array", "items": CALL},
+        "origin": {"type": "array", "items": PAIR},
+        "destination": {"type": "array", "items": PAIR},
+        "reasons": nullable({"type": "array", "items": JSON_OBJECT}),
+        "routeBasis": STRING,
+    },
+    ["uniqueIdentity", "scheduleMetadata", "calls", "origin", "destination", "reasons", "routeBasis"],
+)
+
+PROGRESS_POINT = object_schema({
+    "callIndex": {"type": "integer", "minimum": 0}, "name": STRING_OR_NULL,
+    "location": nullable(JSON_OBJECT),
+    **{prefix + event: STRING_OR_NULL for prefix in ("scheduled", "scheduledInternal", "actual")
+       for event in ("Arrival", "Departure")},
+}, ["callIndex", "name", "location"])
+
+SERVICE_PROGRESS_RESULT = object_schema({
+    "uniqueIdentity": IDENTITY,
+    "state": {"type": "string", "enum": ["not_started", "at_station", "between_calls", "completed"]},
+    "evaluatedAt": {"type": "string", "format": "date-time"},
+    "retrievedAt": {"type": "string", "format": "date-time"},
+    "lastReport": nullable(object_schema({
+        "callIndex": {"type": "integer", "minimum": 0}, "location": nullable(JSON_OBJECT),
+        "event": {"type": "string", "enum": ["arrival", "pass", "departure"]},
+        "reportedAt": STRING,
+    }, ["callIndex", "location", "event", "reportedAt"])),
+    "latenessMinutes": {"type": ["number", "null"]},
+    "departureLatenessMinutes": {"type": ["number", "null"]},
+    "latenessBasis": STRING, "positionBasis": STRING, "timeZone": STRING,
+    "reportAgeSeconds": {"type": "integer", "minimum": 0}, "warnings": STRING_ARRAY,
+    "at": PROGRESS_POINT, "from": PROGRESS_POINT, "to": PROGRESS_POINT,
+    "schematicId": STRING, "imageUrl": {"type": "string", "format": "uri"},
+    "imageMimeType": {"const": "image/png"},
+    "imageWidth": {"type": "integer", "minimum": 1},
+    "imageHeight": {"type": "integer", "minimum": 1},
+    "imageAlt": STRING, "imageMarkdown": STRING, "imageLinkMarkdown": STRING,
+    "imageRetention": STRING, "imageError": STRING,
+}, ["uniqueIdentity", "state", "evaluatedAt", "retrievedAt", "lastReport",
+    "latenessMinutes", "positionBasis", "timeZone", "warnings"])
+
+RESULT_SCHEMAS = {
+    "getServiceProgress": SERVICE_PROGRESS_RESULT,
+    "getServiceSchematic": SERVICE_PROGRESS_RESULT,
+    "getNextDepartures": object_schema(
+        {
+            "station": STRING,
+            "stationCode": STRING,
+            "departures": {"type": "array", "items": DEPARTURE},
+        },
+        ["station", "stationCode", "departures"],
+    ),
+    "searchStationServices": object_schema(
+        {
+            "query": JSON_VALUE,
+            "systemStatus": JSON_VALUE,
+            "services": {"type": "array", "items": SERVICE_SUMMARY},
+        },
+        ["query", "systemStatus", "services"],
+    ),
+    "getServiceDetails": SERVICE_DETAILS,
+    "getRttApiInfo": API_INFO_RESULT,
+    "getApiUsage": USAGE_RESULT,
+    "suggestRailRoute": ROUTE_RESULT,
+    "getJourneyRoute": JOURNEY_ROUTE_RESULT,
+    "getRailMapSnapshot": MAP_SNAPSHOT_RESULT,
+    "findJourneys": FIND_JOURNEYS_RESULT,
+    "getTrainLocation": TRAIN_LOCATION_RESULT,
+    "getRouteDetails": ROUTE_DETAILS_RESULT,
+}
+
+
+def _operation_result_schema(operation):
+    """Reuse a detailed Action schema when that endpoint already defines one."""
+    try:
+        response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        result = response["properties"]["result"]
+    except (KeyError, TypeError):
+        return None
+    return deepcopy(result)
 
 
 def tool_catalog():
@@ -45,15 +404,24 @@ def tool_catalog():
         if operation["operationId"] == "getJourneyRoute":
             properties["legs"] = {"type": "array", "minItems": 1, "maxItems": 6, "items": LEG}
         creates_map = path in {"/v1/route", "/v1/journey-route", "/v1/map-snapshot"}
+        result_schema = RESULT_SCHEMAS.get(operation["operationId"]) or _operation_result_schema(operation)
+        if result_schema is None:
+            raise ValueError(f"No public output schema for {operation['operationId']}")
         catalog[operation["operationId"]] = {
-            "name": operation["operationId"], "title": operation["summary"],
-            "description": operation["description"], "inputSchema": object_schema(properties, required),
-            "outputSchema": {"type": "object", "properties": {"ok": {"type": "boolean"}},
-                             "required": ["ok"], "additionalProperties": True},
-            "annotations": {"readOnlyHint": not creates_map, "destructiveHint": False,
-                            "idempotentHint": not creates_map, "openWorldHint": True},
+            "name": operation["operationId"],
+            "title": operation["summary"],
+            "description": operation["description"],
+            "inputSchema": object_schema(properties, required),
+            "outputSchema": result_schema,
+            "annotations": {
+                "readOnlyHint": not creates_map,
+                "destructiveHint": False,
+                "idempotentHint": not creates_map,
+                "openWorldHint": True,
+            },
             "path": path,
         }
+
     additions = [
         ("getServiceProgress", "Get passenger-friendly service progress",
          "Derive not_started, at_station, between_calls or completed from actual, non-interpolated RTT movement reports only. "
@@ -91,14 +459,13 @@ def tool_catalog():
     ]
     for name, title, description, schema in additions:
         catalog[name] = {"name": name, "title": title, "description": description, "inputSchema": schema,
-                         "outputSchema": {"type": "object", "required": ["ok"],
-                                          "properties": {"ok": {"type": "boolean"}}, "additionalProperties": True},
+                         "outputSchema": deepcopy(RESULT_SCHEMAS[name]),
                          "annotations": {"readOnlyHint": True, "destructiveHint": False,
                                          "idempotentHint": True, "openWorldHint": True}}
     catalog["getServiceProgress"]["annotations"].update(readOnlyHint=False, idempotentHint=False)
     schematic = deepcopy(catalog["getServiceProgress"])
     schematic.update(name="getServiceSchematic", title="Show a service progress schematic",
-                     description="On request, return a PNG schematic of an exact RTT service with its reported station or segment, late sections and current-position glow. Includes progress and request evidence. Omit as_of for current reports; supply an offset-aware historical datetime for replay. Not GPS. Image failures are reported as imageError.")
+                     description="On request, return a PNG schematic of an exact RTT service with its reported station or segment, late sections and current-position glow. Includes progress based on actual movement reports. Omit as_of for current reports; supply an offset-aware historical datetime for replay. Not GPS. Image failures are reported as imageError.")
     schematic["inputSchema"]["properties"].pop("include_image")
     catalog["getServiceSchematic"] = schematic
     return catalog

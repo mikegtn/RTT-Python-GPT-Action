@@ -124,28 +124,26 @@ class ImageWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(importlib.util.find_spec('PIL') and importlib.util.find_spec('mcp'), 'Install mcp and snapshots extras')
 class ImageTransportTests(unittest.TestCase):
-    def test_mcp_native_image_matches_public_png_and_preserves_evidence(self):
+    def test_public_mcp_native_image_matches_public_png_without_diagnostics(self):
         from starlette.testclient import TestClient
         from rtt_app.mcp_server import create_server, create_http_app
         async def backend(path, args):
             return {'ok': True, 'result': fixture(), 'requestEvidence': {'requestId': 'exact-source'}}
         with tempfile.TemporaryDirectory() as directory:
             store = ProgressImages(directory)
-            app = create_http_app(create_server(backend, progress_images=store), 'test-key', progress_images=store)
+            app = create_http_app(create_server(backend, progress_images=store), progress_images=store)
             with TestClient(app) as client:
                 params = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
                     'name': 'getServiceSchematic', 'arguments': {'unique_identity': 'opaque',
                     'as_of': '2026-09-19T20:35:00+01:00'}}}
-                self.assertEqual(client.post('/mcp', json=params).status_code, 401)
                 self.assertEqual(list(Path(directory).iterdir()), [])
-                response = client.post('/mcp', json=params, headers={'Authorization': 'Bearer test-key',
-                    'Accept': 'application/json, text/event-stream'}).json()['result']
+                response = client.post('/mcp', json=params, headers={'Accept': 'application/json, text/event-stream'}).json()['result']
                 self.assertFalse(response['isError'])
                 body = response['structuredContent']
-                self.assertEqual(body['requestEvidence']['operation'], 'getServiceSchematic')
-                self.assertEqual(body['sourceRequestEvidence'], [{'requestId': 'exact-source'}])
+                self.assertNotIn('requestEvidence', body)
+                self.assertNotIn('sourceRequestEvidence', body)
                 native = next(c for c in response['content'] if c['type'] == 'image')
-                public = client.get('/mcp/progress/' + body['result']['schematicId'] + '.png')
+                public = client.get('/mcp/progress/' + body['schematicId'] + '.png')
                 self.assertEqual(public.status_code, 200)
                 self.assertEqual(public.headers['content-type'], 'image/png')
                 self.assertEqual(public.content, base64.b64decode(native['data']))

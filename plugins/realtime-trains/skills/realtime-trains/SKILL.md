@@ -84,9 +84,9 @@ and mention that live rail information can change.
 
 Do not show API calls and responses directly in the chat unless the user asks for
 them specifically.
-For an audit, report only calls actually made and exact returned requestEvidence
-IDs, operation names and timestamps. Separate new verification calls from original
-calls; never reconstruct a missing trace. These IDs can be checked in server logs.
+For an audit, report only calls actually made. Public MCP results omit diagnostic
+request IDs; do not invent them. Separate new verification calls from original
+calls. Server-side diagnostics can be checked by the operator.
 
 You can use the web to find station addresses or maps, seating layouts for specific
 train types, and National Rail information about incidents or disruption.
@@ -140,7 +140,7 @@ Use getTrainLocation for the latest actual timing report. State reportedAt and r
 Use getServiceProgress for passenger progress, passing the exact unique_identity.
 Optional as_of must be an ISO datetime with an explicit offset. It replays actual
 event times in the currently retrieved RTT record, not the information available
-at that historical instant. Preserve requestEvidence and sourceRequestEvidence.
+at that historical instant. Preserve the exact service identity and returned timing evidence; diagnostic request IDs remain server-side.
 The states are not_started (no actual report yet), at_station (actual arrival
 without a later actual departure or pass), between_calls (actual station departure
 and next non-cancelled passenger call), and completed (actual final arrival).

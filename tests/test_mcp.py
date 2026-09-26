@@ -121,6 +121,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["sourceRequestEvidence"], events)
         self.assertEqual(result["result"]["matchedOptions"], 1)
+        if importlib.util.find_spec("jsonschema"):
+            from jsonschema import validate
+            validate(result["result"], tool_catalog()["findJourneys"]["outputSchema"])
         journey = result["result"]["itineraries"][0]
         self.assertEqual([l["uniqueIdentity"] for l in journey["legs"]], ["first", "middle", "last"])
         self.assertEqual(journey["changes"], 2)
@@ -149,6 +152,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         result = await RailWorkflows(backend).call("findJourneys", {
             "origin":"AAA", "destination":"EEE", "time_from":"2026-09-19T18:00:00+01:00",
             "minutes":1, "interchanges":["DDD","BBB","CCC"]})
+        if importlib.util.find_spec("jsonschema"):
+            from jsonschema import validate
+            validate(result["result"], tool_catalog()["findJourneys"]["outputSchema"])
         journey = result["result"]["itineraries"][0]
         self.assertEqual(journey["changes"], 3)
         self.assertEqual(journey["connections"][-1]["scheduledMinutes"], 30)
@@ -165,21 +171,22 @@ class TransportTests(unittest.TestCase):
             self.calls.append((path, params))
             return {"ok": True, "result": service(params.get("unique_identity", "opaque")),
                     "requestEvidence": {"requestId": "unchanged", "operation": "getServiceDetails"}}
-        self.client = TestClient(create_http_app(create_server(backend), "test-key"))
+        self.client = TestClient(create_http_app(create_server(backend)))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        self.headers = {"Authorization": "Bearer test-key", "Accept": "application/json, text/event-stream"}
+        self.headers = {"Accept": "application/json, text/event-stream"}
 
     def rpc(self, method, params=None):
         return self.client.post("/mcp", headers=self.headers,
                                 json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}})
 
-    def test_unauthorized_all_methods(self):
-        for method in ["GET", "POST", "DELETE"]:
-            self.assertEqual(self.client.request(method, "/mcp").status_code, 401)
+    def test_public_endpoint_does_not_require_credentials(self):
+        response = self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                          "clientInfo": {"name": "test", "version": "1"}})
+        self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.calls, [])
 
-    def test_initialize_list_call_resource_and_invalid_input(self):
+    def test_initialize_list_call_and_invalid_input(self):
         response = self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                           "clientInfo": {"name": "test", "version": "1"}})
         self.assertEqual(response.status_code, 200, response.text)
@@ -188,18 +195,37 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(len(catalog), 14)
         by_name = {t["name"]: t for t in catalog}
         self.assertFalse(by_name["getRailMapSnapshot"]["annotations"]["readOnlyHint"])
+        for tool in catalog:
+            self.assertEqual(tool["securitySchemes"], [{"type": "noauth"}])
+            self.assertEqual(tool["_meta"]["securitySchemes"], [{"type": "noauth"}])
+            self.assertIn("outputSchema", tool)
+            self.assertNotEqual(tool["outputSchema"], {
+                "type": "object", "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"], "additionalProperties": True})
         called = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": "opaque"}}).json()["result"]
-        self.assertEqual(called["structuredContent"]["requestEvidence"]["requestId"], "unchanged")
-        self.assertEqual(called["structuredContent"]["result"]["scheduleMetadata"]["uniqueIdentity"], "opaque")
+        self.assertEqual(called["structuredContent"]["scheduleMetadata"]["uniqueIdentity"], "opaque")
+        self.assertNotIn("requestEvidence", called["structuredContent"])
+        self.assertNotIn("sourceRequestEvidence", called["structuredContent"])
         invalid = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": 123}}).json()["result"]
         self.assertTrue(invalid["isError"])
         self.assertEqual(len(self.calls), 1)
-        resource = self.rpc("resources/read", {"uri": "skill://realtime-trains/realtime-trains/SKILL.md"}).json()["result"]
-        self.assertIn("requestEvidence", resource["contents"][0]["text"])
 
     def test_untrusted_origin_is_rejected(self):
         self.headers["Origin"] = "https://attacker.example"
         self.assertEqual(self.rpc("tools/list").status_code, 403)
+
+    def test_public_rate_limit_recovers_in_next_window(self):
+        from unittest.mock import patch
+        with patch("rtt_app.mcp_server.time.time", return_value=600):
+            for _ in range(240):
+                response = self.rpc("ping")
+                self.assertEqual(response.status_code, 200)
+            limited = self.rpc("ping")
+            self.assertEqual(limited.status_code, 429)
+            self.assertEqual(limited.headers["Retry-After"], "60")
+        with patch("rtt_app.mcp_server.time.time", return_value=660):
+            self.assertEqual(self.rpc("ping").status_code, 200)
+        self.assertEqual(self.calls, [])
 
 
 

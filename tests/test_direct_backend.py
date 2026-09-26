@@ -68,7 +68,7 @@ class DirectBackendTests(unittest.TestCase):
             self.assertTrue(result['ok'], result)
             url = result['result']['mapUrl']
             self.assertTrue(url.startswith('https://example.com/mcp/assets/maps/'))
-            app = create_http_app(create_server(DirectBackend(core)), 'key', railway_service=core)
+            app = create_http_app(create_server(DirectBackend(core)), railway_service=core)
             with TestClient(app) as client:
                 page = client.get(url.replace('https://example.com',''))
                 self.assertEqual(page.status_code, 200)
@@ -79,7 +79,7 @@ class DirectBackendTests(unittest.TestCase):
                     icon = client.get('/mcp/assets/icons/coach-' + name + '.svg')
                     self.assertEqual(icon.status_code, 200)
                     self.assertEqual(icon.text, ICONS[name])
-                self.assertEqual(client.get('/mcp', headers={'Accept':'application/json'}).status_code, 401)
+                self.assertEqual(client.get('/health').json()['authentication'], 'none')
                 self.assertEqual(client.get('/health').json()['backend'], 'direct')
             self.assertEqual(json.loads(Path(usage).read_text())['totalRequests'], 1)
             reloaded = RailwayService(FakeTools(), base_url='https://example.com', usage_file=usage)
