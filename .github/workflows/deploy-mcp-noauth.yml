@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TARGET_SHA: "101efb4f5da9525e27c8ec377dff95050b14e734"
+      TARGET_SHA: ${{ github.sha }}
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -61,8 +61,19 @@ jobs:
             "set -euo pipefail; \
              sudo /opt/rtt-mcp/current/.venv/bin/python \
                /opt/rtt-mcp/current/deploy/verify_mcp.py \
-               --date 2026-09-26 \
                --output /tmp/rtt-mcp-noauth-verification.json"
+
+      - name: Verify restored progress and schematic tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          ssh -i ~/.ssh/id_deploy -p "$port" "$VPS_USER@$VPS_HOST" \
+            "set -euo pipefail; \
+             sudo /opt/rtt-mcp/current/.venv/bin/python \
+               /opt/rtt-mcp/current/deploy/verify_mcp.py \
+               --service-progress --progress-image \
+               --output /tmp/rtt-mcp-progress-verification.json"
 
       - name: Check public health endpoint
         shell: bash
