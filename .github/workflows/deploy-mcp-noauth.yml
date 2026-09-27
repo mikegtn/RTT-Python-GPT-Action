@@ -1,0 +1,78 @@
+name: Deploy public MCP no-auth
+
+on:
+  push:
+    branches:
+      - plugin-submission-draft
+    paths:
+      - ".github/workflows/deploy-mcp-noauth.yml"
+
+concurrency:
+  group: trainbrain-production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_SHA: ${{ github.sha }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+    steps:
+      - name: Check deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" || { echo "VPS_HOST secret is missing"; exit 1; }
+          test -n "$VPS_USER" || { echo "VPS_USER secret is missing"; exit 1; }
+          test -n "$VPS_SSH_KEY" || { echo "VPS_SSH_KEY secret is missing"; exit 1; }
+          test -n "$VPS_KNOWN_HOSTS" || { echo "VPS_KNOWN_HOSTS secret is missing"; exit 1; }
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy pinned no-auth release
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          ssh -i ~/.ssh/id_deploy -p "$port" "$VPS_USER@$VPS_HOST" \
+            "trainbrain-deploy $TARGET_SHA"
+
+      - name: Run full production MCP verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          ssh -i ~/.ssh/id_deploy -p "$port" "$VPS_USER@$VPS_HOST" \
+            "trainbrain-verify"
+
+      - name: Verify restored progress and schematic tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          ssh -i ~/.ssh/id_deploy -p "$port" "$VPS_USER@$VPS_HOST" \
+            "trainbrain-verify-progress"
+
+      - name: Check public health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error https://rail.mikegtn.net/health

@@ -34,7 +34,7 @@ class SnapshotAPITests(unittest.TestCase):
         png = b"\x89PNG\r\n\x1a\n\x00\xff"
         def generate(route, target):
             target.write_bytes(png)
-        with patch("rtt_app.action_api.render_snapshot", side_effect=generate) as renderer:
+        with patch("rtt_app.railway_service.render_snapshot", side_effect=generate) as renderer:
             map_id = self.saved_map()
             renderer.assert_not_called()
             response = self.app.dispatch("GET", "/v1/route",
@@ -57,7 +57,7 @@ class SnapshotAPITests(unittest.TestCase):
 
     def test_authentication_validation_and_no_public_rendering(self):
         map_id = self.saved_map()
-        with patch("rtt_app.action_api.render_snapshot") as renderer:
+        with patch("rtt_app.railway_service.render_snapshot") as renderer:
             self.assertEqual(self.app.dispatch("GET", "/v1/map-snapshot", {"map_id": [map_id]}, {}).status, 401)
             self.assertEqual(self.app.dispatch("GET", f"/maps/{map_id}.png", {}, {}).status, 404)
             for bad in ("../secret", "tiles/1-2-3", "a" * 24):
@@ -66,7 +66,7 @@ class SnapshotAPITests(unittest.TestCase):
         self.assertEqual(self.app.dispatch("GET", "/v1/route", {**self.params, "include_snapshot": ["invalid"]}, self.auth).status, 400)
 
     def test_failed_tiles_preserve_route_and_interactive_link(self):
-        with patch("rtt_app.action_api.render_snapshot", side_effect=SnapshotError("Tiles unavailable")):
+        with patch("rtt_app.railway_service.render_snapshot", side_effect=SnapshotError("Tiles unavailable")):
             response = self.app.dispatch("GET", "/v1/route", {**self.params, "include_snapshot": ["true"]}, self.auth)
             result = response.body["result"]
             self.assertEqual(response.status, 200)

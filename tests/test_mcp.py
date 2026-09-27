@@ -20,6 +20,47 @@ def service(identity="opaque-rtt-identity", origin="ABD", destination="PLY", dep
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_journey_deadline_returns_verified_options_with_coverage_flag(self):
+        from unittest.mock import patch
+        ticks = iter([0, 0, 0])
+        async def backend(path, params):
+            if path == "/v1/service":
+                return {"ok": True, "result": service()}
+            return {"ok": True, "result": {"services": [service()]}}
+        with patch("rtt_app.mcp_tools.monotonic", side_effect=lambda: next(ticks, 151)):
+            result = await RailWorkflows(backend).call("findJourneys", {
+                "origin": "ABD", "destination": "PLY", "time_from": "2026-09-19T07:00:00+01:00",
+                "interchanges": ["EDB"]})
+        self.assertTrue(result["ok"], result)
+        value = result["result"]
+        self.assertTrue(value["timeLimitReached"])
+        self.assertFalse(value["requestLimitReached"])
+        self.assertEqual(value["backendRequests"], 2)
+        self.assertEqual(value["itineraries"][0]["legs"][0]["uniqueIdentity"], "opaque-rtt-identity")
+        if importlib.util.find_spec("jsonschema"):
+            from jsonschema import validate
+            validate(value, tool_catalog()["findJourneys"]["outputSchema"])
+
+    async def test_full_day_search_respects_rtt_duration_and_includes_late_train(self):
+        from datetime import timedelta
+        queries = []
+        late = service("late", "ABD", "PLY", "23:58", "23:59")
+        async def backend(path, params):
+            if path == "/v1/service":
+                return {"ok": True, "result": late}
+            queries.append(params)
+            duration = timestamp(params["time_to"]) - timestamp(params["time_from"])
+            self.assertLessEqual(duration, timedelta(minutes=1439))
+            self.assertNotIn("minutes", params)
+            return {"ok": True, "result": {"services": [] if len(queries) == 1 else [late]}}
+        result = await RailWorkflows(backend).call("findJourneys", {
+            "origin": "ABD", "destination": "PLY", "time_from": "2026-09-19T00:00:00+01:00",
+            "minutes": 1439})
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(queries[0]["time_to"], queries[1]["time_from"])
+        self.assertEqual(result["result"]["itineraries"][0]["legs"][0]["uniqueIdentity"], "late")
+
     def test_rtt_local_times_and_clock_changes(self):
         self.assertEqual(timestamp("2026-09-19T05:57:00"), timestamp("2026-09-19T05:57:00+01:00"))
         with self.assertRaises(ValueError):
@@ -95,6 +136,71 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["result"]["minimumConnectionTimesVerified"])
         self.assertEqual(len(result["sourceRequestEvidence"]), 6)
 
+    async def test_three_legs_reject_bad_connections_and_keep_exact_evidence(self):
+        data = {
+            "first": service("first", "ABD", "EDB", "08:20", "10:55"),
+            "middle": service("middle", "EDB", "BHM", "12:52", "17:06"),
+            "early": service("early", "BHM", "PLY", "17:10", "21:00"),
+            "cancelled": service("cancelled", "BHM", "PLY", "18:00", "21:30"),
+            "last": service("last", "BHM", "PLY", "18:12", "21:47"),
+        }
+        data["cancelled"]["calls"][0]["temporalData"]["departure"]["isCancelled"] = True
+        data["middle"]["calls"][1]["temporalData"]["arrival"]["realtimeActual"] = "2026-09-19T18:05:00+01:00"
+        data["last"]["calls"][0]["temporalData"]["departure"]["realtimeActual"] = "2026-09-19T18:12:00+01:00"
+        boards = {("ABD", "EDB"): ["first"], ("EDB", "BHM"): ["middle"],
+                  ("BHM", "PLY"): ["early", "cancelled", "last", "last"]}
+        events = []
+        async def backend(path, params):
+            events.append({"requestId": str(len(events))})
+            result = data[params["unique_identity"]] if path == "/v1/service" else {
+                "services": [{"scheduleMetadata": {"uniqueIdentity": i}}
+                             for i in boards.get((params["station"], params["filter_to"]), [])]}
+            return {"ok": True, "result": result, "requestEvidence": events[-1]}
+        args = {"origin": "ABD", "destination": "PLY", "time_from": "2026-09-19T08:20:00+01:00",
+                "minutes": 1, "interchanges": ["BHM", "EDB"]}
+        result = await RailWorkflows(backend).call("findJourneys", args)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sourceRequestEvidence"], events)
+        self.assertEqual(result["result"]["matchedOptions"], 1)
+        if importlib.util.find_spec("jsonschema"):
+            from jsonschema import validate
+            validate(result["result"], tool_catalog()["findJourneys"]["outputSchema"])
+        journey = result["result"]["itineraries"][0]
+        self.assertEqual([l["uniqueIdentity"] for l in journey["legs"]], ["first", "middle", "last"])
+        self.assertEqual(journey["changes"], 2)
+        self.assertEqual([c["scheduledMinutes"] for c in journey["connections"]], [117, 66])
+        self.assertEqual(journey["connections"][1]["latestMinutes"], 7)
+        self.assertIn("BHM", journey["warnings"][-1])
+        limited = await RailWorkflows(backend).call("findJourneys", {**args, "max_changes": 1})
+        self.assertEqual(limited["result"]["itineraries"], [])
+
+    async def test_three_changes_and_overnight_connection(self):
+        stations = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+        data = [service(str(i), stations[i], stations[i+1], dep, arr)
+                for i, (dep, arr) in enumerate([("18:00", "19:00"), ("19:30", "20:00"),
+                                                ("20:30", "23:50"), ("00:20", "01:00")])]
+        for call in data[3]["calls"]:
+            for timing in call["temporalData"].values():
+                if isinstance(timing, dict):
+                    timing["scheduleAdvertised"] = timing["scheduleAdvertised"].replace("09-19", "09-20")
+        async def backend(path, params):
+            if path == "/v1/service":
+                value = data[int(params["unique_identity"])]
+            else:
+                value = {"services": [s for i,s in enumerate(data)
+                         if (params["station"], params["filter_to"]) == (stations[i],stations[i+1])]}
+            return {"ok": True, "result": value}
+        result = await RailWorkflows(backend).call("findJourneys", {
+            "origin":"AAA", "destination":"EEE", "time_from":"2026-09-19T18:00:00+01:00",
+            "minutes":1, "interchanges":["DDD","BBB","CCC"]})
+        if importlib.util.find_spec("jsonschema"):
+            from jsonschema import validate
+            validate(result["result"], tool_catalog()["findJourneys"]["outputSchema"])
+        journey = result["result"]["itineraries"][0]
+        self.assertEqual(journey["changes"], 3)
+        self.assertEqual(journey["connections"][-1]["scheduledMinutes"], 30)
+        self.assertEqual([l["uniqueIdentity"] for l in journey["legs"]], ["0","1","2","3"])
+
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "Install the mcp extra for transport tests")
 class TransportTests(unittest.TestCase):
@@ -106,48 +212,75 @@ class TransportTests(unittest.TestCase):
             self.calls.append((path, params))
             return {"ok": True, "result": service(params.get("unique_identity", "opaque")),
                     "requestEvidence": {"requestId": "unchanged", "operation": "getServiceDetails"}}
-        self.client = TestClient(create_http_app(create_server(backend), "test-key"))
+        self.client = TestClient(create_http_app(create_server(backend)))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        self.headers = {"Authorization": "Bearer test-key", "Accept": "application/json, text/event-stream"}
+        self.headers = {"Accept": "application/json, text/event-stream"}
 
     def rpc(self, method, params=None):
         return self.client.post("/mcp", headers=self.headers,
                                 json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}})
 
-    def test_unauthorized_all_methods(self):
-        for method in ["GET", "POST", "DELETE"]:
-            self.assertEqual(self.client.request(method, "/mcp").status_code, 401)
-        self.assertEqual(self.calls, [])
-
-    def test_initialize_list_call_resource_and_invalid_input(self):
+    def test_public_endpoint_does_not_require_credentials(self):
         response = self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                           "clientInfo": {"name": "test", "version": "1"}})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["result"]["serverInfo"]["name"], "realtime-trains")
+        self.assertEqual(self.calls, [])
+
+    def test_initialize_list_call_and_invalid_input(self):
+        response = self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                          "clientInfo": {"name": "test", "version": "1"}})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["result"]["serverInfo"]["name"], "trainbrain")
         catalog = self.rpc("tools/list").json()["result"]["tools"]
-        self.assertEqual(len(catalog), 12)
+        self.assertEqual(len(catalog), 14)
         by_name = {t["name"]: t for t in catalog}
         self.assertFalse(by_name["getRailMapSnapshot"]["annotations"]["readOnlyHint"])
+        for tool in catalog:
+            self.assertEqual(tool["securitySchemes"], [{"type": "noauth"}])
+            self.assertEqual(tool["_meta"]["securitySchemes"], [{"type": "noauth"}])
+            self.assertIn("outputSchema", tool)
+            self.assertNotEqual(tool["outputSchema"], {
+                "type": "object", "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"], "additionalProperties": True})
         called = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": "opaque"}}).json()["result"]
-        self.assertEqual(called["structuredContent"]["requestEvidence"]["requestId"], "unchanged")
-        self.assertEqual(called["structuredContent"]["result"]["scheduleMetadata"]["uniqueIdentity"], "opaque")
+        self.assertEqual(called["structuredContent"]["scheduleMetadata"]["uniqueIdentity"], "opaque")
+        self.assertNotIn("requestEvidence", called["structuredContent"])
+        self.assertNotIn("sourceRequestEvidence", called["structuredContent"])
         invalid = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {"unique_identity": 123}}).json()["result"]
         self.assertTrue(invalid["isError"])
         self.assertEqual(len(self.calls), 1)
-        resource = self.rpc("resources/read", {"uri": "skill://realtime-trains/realtime-trains/SKILL.md"}).json()["result"]
-        self.assertIn("requestEvidence", resource["contents"][0]["text"])
 
     def test_untrusted_origin_is_rejected(self):
         self.headers["Origin"] = "https://attacker.example"
         self.assertEqual(self.rpc("tools/list").status_code, 403)
 
-    def test_backend_requires_secure_destination(self):
-        from rtt_app.mcp_server import ActionBackend
-        with self.assertRaises(ValueError):
-            ActionBackend("secret", "http://example.com")
-        with self.assertRaises(ValueError):
-            ActionBackend("secret", "https://user:password@example.com")
+    def test_protocol_trace_reports_rejection_without_arguments_or_credentials(self):
+        self.headers.update({"MCP-Protocol-Version": "2099-01-01", "Authorization": "Bearer private-test-secret"})
+        with self.assertLogs("rtt.mcp", level="INFO") as logs:
+            response = self.rpc("tools/call", {"name": "getServiceDetails", "arguments": {
+                "unique_identity": "private-query-value"}})
+        self.assertEqual(response.status_code, 400)
+        record = json.loads(logs.records[-1].getMessage())
+        self.assertEqual(record["method"], "tools/call")
+        self.assertEqual(record["protocolHeader"], "2099-01-01")
+        self.assertEqual(record["errorKind"], "unsupported_protocol")
+        self.assertNotIn("private-test-secret", str(logs.output))
+        self.assertNotIn("private-query-value", str(logs.output))
+
+    def test_public_rate_limit_recovers_in_next_window(self):
+        from unittest.mock import patch
+        with patch("rtt_app.mcp_server.time.time", return_value=600):
+            for _ in range(240):
+                response = self.rpc("ping")
+                self.assertEqual(response.status_code, 200)
+            limited = self.rpc("ping")
+            self.assertEqual(limited.status_code, 429)
+            self.assertEqual(limited.headers["Retry-After"], "60")
+        with patch("rtt_app.mcp_server.time.time", return_value=660):
+            self.assertEqual(self.rpc("ping").status_code, 200)
+        self.assertEqual(self.calls, [])
+
 
 
 if __name__ == "__main__":

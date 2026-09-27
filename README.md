@@ -326,7 +326,13 @@ Raw coach evidence is unchanged. Image rendering depends on the consuming
 client; GPT instructions request Markdown images beside coach letters.
 # MCP / plugin migration
 
-The optional authenticated MCP adapter runs alongside the existing GPT Action.
-See [the Realtime Trains plugin](plugins/realtime-trains/README.md) for its twelve
-tools, preserved instructions, deployment, verification, and remaining ChatGPT
-OAuth/knowledge-file migration gates. Install with `pip install '.[mcp]'`.
+The MCP adapter runs alongside the existing authenticated GPT Action but exposes a
+separate public, no-auth MCP endpoint at `https://rail.mikegtn.net/mcp`. Upstream
+Realtime Trains credentials remain server-side in the direct railway backend.
+Every public tool declares `noauth` security metadata and a model-facing output
+schema; Action request-evidence fields are retained for server logging rather than
+returned through MCP.
+
+Version 0.1.0 is intentionally MCP-tools-only. See
+[TrainBrain](plugins/realtime-trains/README.md) for its fourteen tools,
+deployment and verification details. Install with `pip install '.[mcp]'`.

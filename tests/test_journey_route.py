@@ -138,7 +138,7 @@ class JourneyRouteTests(unittest.TestCase):
                                     route_engine=self.engine, map_dir=folder)
             args = {"legs": [json.dumps(self.legs)]}
             auth = {"Authorization": "Bearer test"}
-            with patch("rtt_app.action_api.render_snapshot") as renderer:
+            with patch("rtt_app.railway_service.render_snapshot") as renderer:
                 response = app.dispatch("GET", "/v1/journey-route", args, auth)
                 self.assertEqual(response.status, 200)
                 renderer.assert_not_called()

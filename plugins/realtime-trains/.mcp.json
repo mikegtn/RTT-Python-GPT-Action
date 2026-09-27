@@ -2,10 +2,7 @@
   "mcpServers": {
     "realtime-trains": {
       "type": "http",
-      "url": "https://rail.mikegtn.net/mcp",
-      "headers": {
-        "Authorization": "Bearer ${RTT_MCP_API_KEY}"
-      }
+      "url": "https://rail.mikegtn.net/mcp"
     }
   }
 }
